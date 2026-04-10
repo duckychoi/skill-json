@@ -54,9 +54,6 @@ test-results/
 .ruff_cache/
 e2e-test-output.log
 
-# .agents/ 는 .claude/ 의 자동 생성 미러 (sync-agents.sh) — 중복 tracking 방지
-/.agents/
-
 # 대용량 input 바이너리 (로컬 전용)
 /input/hwpx/
 /input/shot/

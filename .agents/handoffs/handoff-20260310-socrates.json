@@ -1,0 +1,50 @@
+{
+  "completed_skill": "socrates",
+  "next_skill": "screen-spec",
+  "timestamp": "2026-03-10",
+  "context_summary": {
+    "project_name": "newVideoGen",
+    "description": "SRT 자막 + 더빙 오디오 → AI가 프레젠테이션 영상 자동 생성. Claude Code 스킬 5개 + Next.js 웹 에디터 + Remotion 렌더링",
+    "user_level": "L4",
+    "features": [
+      "FEAT-1: 의미 청킹 엔진 (SRT → 의미 역할 + 비트 분해)",
+      "FEAT-2: 장면 선택 + DSL 생성 (제약 기반 변주, 8개 루트 레이아웃)",
+      "FEAT-3: 타임라인 에디터 (웹 앱, 구간 편집, DSL 수정)",
+      "FEAT-4: Remotion 렌더링 (DSL → TSX → mp4)"
+    ],
+    "screens": [
+      "S1: 타임라인 에디터 (메인, /, 장면 시퀀스 + DSL 편집 + 오디오 파형)",
+      "S2: Remotion 프리뷰 (/preview, Remotion Player 실시간)",
+      "S3: 렌더 출력 (/render, 진행률 + mp4 다운로드)"
+    ],
+    "tech_stack": {
+      "frontend": "Next.js + Tailwind CSS + ShadCN UI",
+      "video": "Remotion",
+      "skills": "Claude Code Skills (TypeScript)",
+      "dsl": "Scene DSL (JSON)",
+      "backend": "파일 시스템 기반"
+    },
+    "architecture": {
+      "pipeline": "4층: 의미 청킹 → 장면 DSL → 레이아웃 엔진 → Remotion 렌더",
+      "skills": ["/vg-analyze", "/vg-catalog", "/vg-chunk", "/vg-scene", "/vg-render"],
+      "layout_families": ["hero-center", "split-2col", "grid-4x3", "process-horizontal", "radial-focus", "stacked-vertical", "comparison-bars", "spotlight-case"],
+      "scene_selection": "의미적합도(40) + 증거타입(20) + 리듬(15) + 자산(10) - 중복(-25) - 유사(-20)",
+      "three_grammars": ["Layout", "Motion", "Asset"],
+      "copy_layers": ["kicker", "headline", "supporting", "footer caption"]
+    },
+    "constraints": {
+      "quality": "AI 80%+, 미세 조정만",
+      "time": "수시간 → 수십분",
+      "design": "다크 배경 + 네온 그린, 깔끔 담백, 대형 SVG"
+    }
+  },
+  "output_files": [
+    "docs/planning/01-prd.md",
+    "docs/planning/02-user-stories.md",
+    "docs/planning/03-tech-stack.md",
+    "docs/planning/04-architecture.md",
+    "docs/planning/05-api-spec.md",
+    "docs/planning/06-screens.md",
+    "docs/planning/07-coding-convention.md"
+  ]
+}
