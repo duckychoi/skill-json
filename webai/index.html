@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FrameAI — 이미지를 동영상으로</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg-base:    #0c0e12;
+    --bg-surface: #13181e;
+    --bg-panel:   #1a2027;
+    --bg-card:    #1f2223;
+    --bg-hover:   #1f2627;
+    --accent:     #3ca2f6;
+    --accent-dim: #2181d4;
+    --text-primary:   #ffffff;
+    --text-secondary: #b3b5b7;
+    --text-muted:     #6c7174;
+    --border:     #2a2f35;
+    --border-light: #333a42;
+    --radius-sm: 8px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-pill: 9999px;
+  }
+
+  html, body { height: 100%; font-family: 'Pretendard', 'Noto Sans KR', -apple-system, sans-serif; background: var(--bg-base); color: var(--text-primary); overflow: hidden; }
+
+  /* ─── HEADER ─── */
+  header {
+    position: fixed; top: 0; left: 0; right: 0; height: 60px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 20px; z-index: 100;
+  }
+  .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .logo-icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: linear-gradient(135deg, #3ca2f6, #7c3aed);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700; color: #fff;
+  }
+  .logo-text { font-size: 18px; font-weight: 700; color: #fff; letter-spacing: -0.3px; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .btn-ghost {
+    background: none; border: none; color: var(--text-secondary);
+    font-size: 14px; cursor: pointer; padding: 6px 12px; border-radius: var(--radius-sm);
+    transition: color .15s, background .15s;
+  }
+  .btn-ghost:hover { color: #fff; background: var(--bg-hover); }
+  .btn-primary {
+    background: var(--accent); border: none; color: #fff;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    padding: 8px 20px; border-radius: var(--radius-pill);
+    transition: background .15s, transform .1s;
+  }
+  .btn-primary:hover { background: var(--accent-dim); }
+  .btn-primary:active { transform: scale(.97); }
+  .avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: linear-gradient(135deg, #3ca2f6, #7c3aed);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+
+  /* ─── LAYOUT ─── */
+  .app-layout {
+    display: flex; height: 100vh; padding-top: 60px;
+  }
+
+  /* ─── SIDEBAR ─── */
+  aside {
+    width: 242px; flex-shrink: 0;
+    background: var(--bg-surface);
+    border-right: 1px solid var(--border);
+    padding: 16px 12px;
+    overflow-y: auto;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .sidebar-section-label {
+    font-size: 11px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .8px;
+    padding: 12px 8px 6px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px; border-radius: var(--radius-md);
+    font-size: 14px; color: var(--text-secondary);
+    cursor: pointer; text-decoration: none;
+    transition: background .13s, color .13s;
+    position: relative;
+  }
+  .nav-item:hover { background: var(--bg-hover); color: #fff; }
+  .nav-item.active { background: var(--bg-card); color: #fff; }
+  .nav-item .nav-icon { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; }
+  .nav-item .nav-badge {
+    margin-left: auto; font-size: 10px; font-weight: 600;
+    background: var(--accent); color: #fff;
+    padding: 2px 6px; border-radius: var(--radius-pill);
+  }
+  .sidebar-divider { height: 1px; background: var(--border); margin: 8px 4px; }
+
+  /* ─── MAIN ─── */
+  main {
+    flex: 1; display: flex; overflow: hidden;
+  }
+
+  /* ─── CENTER PANEL ─── */
+  .center-panel {
+    width: 480px; flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .center-header {
+    padding: 20px 20px 0;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 16px;
+  }
+  .center-header h1 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+  .center-header p { font-size: 13px; color: var(--text-muted); }
+  .center-body { padding: 20px; display: flex; flex-direction: column; gap: 20px; flex: 1; }
+
+  /* upload */
+  .upload-zone {
+    border: 2px dashed var(--border-light);
+    border-radius: var(--radius-lg);
+    background: var(--bg-card);
+    padding: 32px 20px;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    cursor: pointer; transition: border-color .15s, background .15s;
+    position: relative;
+  }
+  .upload-zone:hover { border-color: var(--accent); background: #1a2e3e; }
+  .upload-zone.has-image { padding: 0; overflow: hidden; border-style: solid; border-color: var(--border); }
+  .upload-zone.has-image img { width: 100%; height: 200px; object-fit: cover; border-radius: 12px; display: block; }
+  .upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .upload-icon { font-size: 32px; }
+  .upload-title { font-size: 15px; font-weight: 600; }
+  .upload-sub { font-size: 12px; color: var(--text-muted); }
+  .upload-formats { font-size: 11px; color: var(--text-muted); }
+  .upload-overlay-btn {
+    position: absolute; top: 8px; right: 8px;
+    background: rgba(0,0,0,.7); border: none; color: #fff;
+    border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer;
+    display: none;
+  }
+  .has-image .upload-overlay-btn { display: block; }
+
+  /* field */
+  .field { display: flex; flex-direction: column; gap: 8px; }
+  .field-label {
+    font-size: 14px; font-weight: 600; color: var(--text-primary);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .field-label .badge-new {
+    font-size: 10px; background: #7c3aed; color: #fff;
+    padding: 1px 6px; border-radius: 4px; font-weight: 600;
+  }
+  .field-hint { font-size: 12px; color: var(--text-muted); }
+  textarea.prompt-input {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-md); color: var(--text-primary);
+    font-size: 14px; padding: 12px 14px; resize: vertical; min-height: 90px;
+    font-family: inherit; line-height: 1.6; transition: border-color .15s;
+  }
+  textarea.prompt-input::placeholder { color: var(--text-muted); }
+  textarea.prompt-input:focus { outline: none; border-color: var(--accent); }
+
+  /* settings row */
+  .settings-row { display: flex; gap: 12px; }
+  .setting-item {
+    flex: 1; background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: 10px 12px; cursor: pointer;
+    transition: border-color .15s;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .setting-item:hover { border-color: var(--border-light); }
+  .setting-item.active-setting { border-color: var(--accent); }
+  .setting-key { font-size: 11px; color: var(--text-muted); }
+  .setting-val { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+
+  /* duration tabs */
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tab {
+    padding: 6px 14px; border-radius: var(--radius-pill);
+    background: var(--bg-card); border: 1px solid var(--border);
+    font-size: 13px; color: var(--text-secondary); cursor: pointer;
+    transition: all .13s;
+  }
+  .tab:hover { border-color: var(--border-light); color: #fff; }
+  .tab.active { background: #1a2e3e; border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
+  /* generate button */
+  .btn-generate {
+    background: var(--accent); border: none; color: #fff;
+    font-size: 16px; font-weight: 600; cursor: pointer;
+    padding: 14px; border-radius: var(--radius-md);
+    width: 100%; transition: background .15s, transform .1s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    margin-top: auto;
+  }
+  .btn-generate:hover { background: var(--accent-dim); }
+  .btn-generate:active { transform: scale(.98); }
+  .btn-generate:disabled { background: #2a3a4a; color: var(--text-muted); cursor: not-allowed; transform: none; }
+
+  /* credits */
+  .credits-info { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+  .credits-info span { color: var(--accent); font-weight: 600; }
+
+  /* ─── RIGHT PANEL ─── */
+  .right-panel {
+    flex: 1; display: flex; flex-direction: column;
+    background: var(--bg-base);
+    overflow: hidden;
+  }
+  .right-toolbar {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .right-toolbar h2 { font-size: 15px; font-weight: 600; flex: 1; }
+  .toolbar-btn {
+    background: var(--bg-card); border: 1px solid var(--border);
+    color: var(--text-secondary); font-size: 13px; cursor: pointer;
+    padding: 6px 14px; border-radius: var(--radius-pill);
+    display: flex; align-items: center; gap: 6px;
+    transition: all .13s;
+  }
+  .toolbar-btn:hover { border-color: var(--border-light); color: #fff; }
+  .toolbar-btn.accent { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .toolbar-btn.accent:hover { background: var(--accent-dim); border-color: var(--accent-dim); }
+
+  .right-body { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* video preview */
+  .video-area {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    padding: 40px; background: var(--bg-base);
+    position: relative;
+  }
+  .video-placeholder {
+    width: 100%; max-width: 600px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    aspect-ratio: 16/9;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; color: var(--text-muted); position: relative;
+  }
+  .video-placeholder.generating { border-color: var(--accent); }
+  .placeholder-icon { font-size: 48px; opacity: .4; }
+  .placeholder-text { font-size: 15px; font-weight: 600; color: var(--text-secondary); }
+  .placeholder-sub { font-size: 13px; }
+
+  /* progress bar */
+  .progress-wrap {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+    background: var(--border); display: none;
+  }
+  .progress-wrap.show { display: block; }
+  .progress-bar {
+    height: 100%; width: 0%; background: var(--accent);
+    border-radius: 2px; transition: width .3s ease;
+  }
+
+  /* spinner */
+  .spinner {
+    width: 48px; height: 48px; border-radius: 50%;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    animation: spin 1s linear infinite;
+    display: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* result video */
+  .result-video {
+    width: 100%; height: 100%; object-fit: contain;
+    display: none; border-radius: var(--radius-lg);
+  }
+
+  /* gallery strip */
+  .gallery-strip {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-surface);
+  }
+  .gallery-label { font-size: 11px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: .6px; }
+  .gallery-items { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+  .gallery-items::-webkit-scrollbar { height: 4px; }
+  .gallery-items::-webkit-scrollbar-track { background: transparent; }
+  .gallery-items::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .gallery-item {
+    flex-shrink: 0; width: 120px; height: 68px; border-radius: 8px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    cursor: pointer; overflow: hidden; position: relative;
+    transition: border-color .13s;
+  }
+  .gallery-item:hover { border-color: var(--accent); }
+  .gallery-item img { width: 100%; height: 100%; object-fit: cover; }
+  .gallery-item .gallery-duration {
+    position: absolute; bottom: 4px; right: 4px;
+    background: rgba(0,0,0,.75); font-size: 10px; font-weight: 600;
+    color: #fff; padding: 1px 5px; border-radius: 4px;
+  }
+  .gallery-add {
+    flex-shrink: 0; width: 120px; height: 68px; border-radius: 8px;
+    background: var(--bg-card); border: 2px dashed var(--border);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 22px; color: var(--text-muted); transition: border-color .13s, color .13s;
+  }
+  .gallery-add:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* toast */
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
+    background: var(--bg-panel); border: 1px solid var(--border);
+    color: var(--text-primary); font-size: 14px; padding: 12px 20px;
+    border-radius: var(--radius-pill); box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    transition: transform .3s ease; z-index: 999; pointer-events: none;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.success { border-color: var(--accent); }
+
+  /* select dropdown */
+  select.setting-select {
+    background: transparent; border: none; color: var(--text-primary);
+    font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer;
+    outline: none; width: 100%; padding: 0;
+    -webkit-appearance: none; appearance: none;
+  }
+  option { background: var(--bg-panel); }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <a href="#" class="logo">
+    <div class="logo-icon">F</div>
+    <span class="logo-text">FrameAI</span>
+  </a>
+  <div class="header-right">
+    <button class="btn-ghost">요금제</button>
+    <button class="btn-ghost">갤러리</button>
+    <button class="btn-primary" onclick="showToast('회원가입 준비 중입니다')">무료로 시작하기</button>
+    <div class="avatar">U</div>
+  </div>
+</header>
+
+<!-- APP LAYOUT -->
+<div class="app-layout">
+
+  <!-- SIDEBAR -->
+  <aside>
+    <div class="sidebar-section-label">도구</div>
+    <a href="#" class="nav-item">
+      <span class="nav-icon">🧭</span> 탐색
+    </a>
+    <a href="#" class="nav-item active">
+      <span class="nav-icon">🎬</span> 이미지→동영상
+    </a>
+    <a href="#" class="nav-item">
+      <span class="nav-icon">📝</span> 텍스트→동영상
+    </a>
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-section-label">AI 생성</div>
+    <a href="#" class="nav-item">
+      <span class="nav-icon">🖼️</span> AI 이미지 <span class="nav-badge">NEW</span>
+    </a>
+    <a href="image-editor.html" class="nav-item">
+      <span class="nav-icon">✏️</span> AI 이미지 에디터
+    </a>
+    <a href="video-editor.html" class="nav-item">
+      <span class="nav-icon">🎞️</span> AI 비디오 에디터
+    </a>
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-section-label">크리에이터</div>
+    <a href="#" class="nav-item">
+      <span class="nav-icon">🧑‍🎤</span> AI 아바타
+    </a>
+    <a href="#" class="nav-item">
+      <span class="nav-icon">🎵</span> AI 음악
+    </a>
+    <a href="#" class="nav-item">
+      <span class="nav-icon">🔊</span> AI 보이스오버
+    </a>
+    <div class="sidebar-divider"></div>
+    <a href="#" class="nav-item" style="margin-top:auto;">
+      <span class="nav-icon">⚙️</span> 설정
+    </a>
+  </aside>
+
+  <!-- MAIN -->
+  <main>
+
+    <!-- CENTER PANEL -->
+    <div class="center-panel">
+      <div class="center-header">
+        <h1>이미지를 동영상으로 변환</h1>
+        <p>이미지를 업로드하고 AI로 생동감 있는 동영상을 만드세요</p>
+      </div>
+      <div class="center-body">
+
+        <!-- Upload -->
+        <div class="field">
+          <div class="field-label">시작 이미지</div>
+          <div class="upload-zone" id="uploadZone" ondragover="handleDrag(event)" ondrop="handleDrop(event)">
+            <input type="file" accept="image/*" id="fileInput" onchange="handleFile(this)" />
+            <div class="upload-icon">🖼️</div>
+            <div class="upload-title">이미지를 드래그하거나 클릭하세요</div>
+            <div class="upload-sub">JPG, PNG, WEBP 지원</div>
+            <div class="upload-formats">최대 10MB · 권장 해상도 1024×1024</div>
+            <button class="upload-overlay-btn" onclick="clearImage(event)">변경</button>
+          </div>
+        </div>
+
+        <!-- Prompt -->
+        <div class="field">
+          <div class="field-label">
+            AI 프롬프트
+            <span class="badge-new">선택</span>
+          </div>
+          <div class="field-hint">동영상에 원하는 움직임이나 효과를 설명하세요</div>
+          <textarea class="prompt-input" id="promptInput"
+            placeholder="예: 부드러운 카메라 줌인, 물결치는 효과, 바람에 날리는 머리카락..."></textarea>
+        </div>
+
+        <!-- Settings -->
+        <div class="field">
+          <div class="field-label">설정</div>
+          <div class="settings-row">
+            <div class="setting-item active-setting">
+              <div class="setting-key">품질</div>
+              <select class="setting-select" id="qualitySelect">
+                <option>V2.5 Pro</option>
+                <option>V2.5 Standard</option>
+                <option>V2.0 Fast</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <div class="setting-key">해상도</div>
+              <select class="setting-select" id="resolutionSelect">
+                <option>720P</option>
+                <option>1080P</option>
+                <option>512P</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <div class="setting-key">비율</div>
+              <select class="setting-select" id="ratioSelect">
+                <option>16:9</option>
+                <option>9:16</option>
+                <option>1:1</option>
+                <option>4:3</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Duration -->
+        <div class="field">
+          <div class="field-label">영상 길이</div>
+          <div class="tabs" id="durationTabs">
+            <div class="tab" onclick="selectTab(this)">3초</div>
+            <div class="tab active" onclick="selectTab(this)">5초</div>
+            <div class="tab" onclick="selectTab(this)">8초</div>
+            <div class="tab" onclick="selectTab(this)">10초</div>
+            <div class="tab" onclick="selectTab(this)">자동</div>
+          </div>
+        </div>
+
+        <!-- Motion Strength -->
+        <div class="field">
+          <div class="field-label">모션 강도</div>
+          <input type="range" id="motionRange" min="1" max="10" value="5"
+            oninput="document.getElementById('motionVal').textContent=this.value"
+            style="width:100%;accent-color:var(--accent);cursor:pointer;" />
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);">
+            <span>자연스러움</span>
+            <span id="motionVal" style="color:var(--accent);font-weight:600;">5</span>
+            <span>역동적</span>
+          </div>
+        </div>
+
+        <!-- Generate -->
+        <button class="btn-generate" id="generateBtn" onclick="startGenerate()">
+          <span>✦</span> 생성하기
+        </button>
+        <div class="credits-info">
+          <span>12</span> 크레딧 남음 · 생성 1회 = 2크레딧
+        </div>
+
+      </div><!-- /center-body -->
+    </div><!-- /center-panel -->
+
+    <!-- RIGHT PANEL -->
+    <div class="right-panel">
+      <div class="right-toolbar">
+        <h2>미리보기</h2>
+        <button class="toolbar-btn" id="downloadBtn" style="display:none;" onclick="showToast('다운로드 시작됩니다', true)">
+          ⬇ 다운로드
+        </button>
+        <button class="toolbar-btn" id="shareBtn" style="display:none;" onclick="showToast('링크가 복사되었습니다', true)">
+          🔗 공유
+        </button>
+        <button class="toolbar-btn accent" onclick="startGenerate()">✦ 생성</button>
+      </div>
+
+      <div class="right-body">
+        <div class="video-area">
+          <div class="video-placeholder" id="videoPlaceholder">
+            <div class="spinner" id="spinner"></div>
+            <div class="placeholder-icon" id="placeholderIcon">🎬</div>
+            <div class="placeholder-text" id="placeholderText">생성된 동영상이 여기에 표시됩니다</div>
+            <div class="placeholder-sub" id="placeholderSub">이미지를 업로드하고 생성 버튼을 누르세요</div>
+            <div class="progress-wrap" id="progressWrap">
+              <div class="progress-bar" id="progressBar"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gallery -->
+        <div class="gallery-strip">
+          <div class="gallery-label">최근 생성</div>
+          <div class="gallery-items" id="galleryItems">
+            <div class="gallery-add" onclick="showToast('이미지를 먼저 업로드하세요')">+</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /right-panel -->
+
+  </main>
+</div><!-- /app-layout -->
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+  let generating = false;
+  let imageLoaded = false;
+
+  // ── File upload ──
+  function handleFile(input) {
+    const file = input.files[0];
+    if (!file) return;
+    loadImage(file);
+  }
+
+  function handleDrag(e) { e.preventDefault(); e.currentTarget.style.borderColor = '#3ca2f6'; }
+  function handleDrop(e) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) loadImage(file);
+  }
+
+  function loadImage(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const zone = document.getElementById('uploadZone');
+      zone.innerHTML = `
+        <img src="${e.target.result}" alt="uploaded" />
+        <button class="upload-overlay-btn" onclick="clearImage(event)">변경</button>
+        <input type="file" accept="image/*" id="fileInput" onchange="handleFile(this)" style="display:none;" />
+      `;
+      zone.classList.add('has-image');
+      imageLoaded = true;
+      showToast('이미지가 업로드되었습니다', true);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function clearImage(e) {
+    e.stopPropagation();
+    const zone = document.getElementById('uploadZone');
+    zone.classList.remove('has-image');
+    zone.innerHTML = `
+      <input type="file" accept="image/*" id="fileInput" onchange="handleFile(this)" />
+      <div class="upload-icon">🖼️</div>
+      <div class="upload-title">이미지를 드래그하거나 클릭하세요</div>
+      <div class="upload-sub">JPG, PNG, WEBP 지원</div>
+      <div class="upload-formats">최대 10MB · 권장 해상도 1024×1024</div>
+      <button class="upload-overlay-btn" onclick="clearImage(event)">변경</button>
+    `;
+    imageLoaded = false;
+  }
+
+  // ── Tabs ──
+  function selectTab(el) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+  }
+
+  // ── Generate ──
+  function startGenerate() {
+    if (generating) return;
+    if (!imageLoaded) { showToast('이미지를 먼저 업로드하세요'); return; }
+
+    generating = true;
+    const btn = document.getElementById('generateBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="display:inline-block;width:18px;height:18px;border-width:2px;vertical-align:middle;margin-right:6px;"></span> 생성 중...';
+
+    const placeholder = document.getElementById('videoPlaceholder');
+    placeholder.classList.add('generating');
+    document.getElementById('placeholderIcon').style.display = 'none';
+    document.getElementById('placeholderText').textContent = 'AI가 동영상을 생성하고 있습니다...';
+    document.getElementById('placeholderSub').textContent = '품질에 따라 30초~3분 소요됩니다';
+    document.getElementById('spinner').style.display = 'block';
+    document.getElementById('progressWrap').classList.add('show');
+
+    // simulate progress
+    let progress = 0;
+    const bar = document.getElementById('progressBar');
+    const stages = [
+      { target: 15, label: '이미지 분석 중...', delay: 600 },
+      { target: 40, label: '모션 패턴 생성 중...', delay: 1200 },
+      { target: 70, label: '프레임 렌더링 중...', delay: 1800 },
+      { target: 90, label: '마무리 처리 중...', delay: 1000 },
+      { target: 100, label: '완료!', delay: 500 },
+    ];
+
+    let stageIdx = 0;
+    function runStage() {
+      if (stageIdx >= stages.length) {
+        finishGenerate();
+        return;
+      }
+      const s = stages[stageIdx++];
+      document.getElementById('placeholderText').textContent = s.label;
+      bar.style.width = s.target + '%';
+      setTimeout(runStage, s.delay + Math.random() * 400);
+    }
+    runStage();
+  }
+
+  function finishGenerate() {
+    generating = false;
+
+    document.getElementById('spinner').style.display = 'none';
+    document.getElementById('progressWrap').classList.remove('show');
+
+    const placeholder = document.getElementById('videoPlaceholder');
+    placeholder.classList.remove('generating');
+    placeholder.style.background = '#0c0e12';
+
+    // show success state
+    document.getElementById('placeholderIcon').style.display = 'none';
+    document.getElementById('placeholderText').innerHTML = `
+      <div style="font-size:48px;margin-bottom:8px;">✅</div>
+      <div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:6px;">동영상 생성 완료!</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">5초 · 720P · 16:9</div>
+      <button onclick="showToast('다운로드 시작됩니다', true)"
+        style="background:var(--accent);border:none;color:#fff;font-size:14px;font-weight:600;
+               padding:10px 24px;border-radius:9999px;cursor:pointer;">
+        ⬇ 다운로드
+      </button>
+    `;
+    document.getElementById('placeholderSub').textContent = '';
+
+    const btn = document.getElementById('generateBtn');
+    btn.disabled = false;
+    btn.innerHTML = '<span>✦</span> 다시 생성';
+
+    document.getElementById('downloadBtn').style.display = 'flex';
+    document.getElementById('shareBtn').style.display = 'flex';
+
+    // add to gallery
+    addGalleryItem();
+    showToast('동영상이 생성되었습니다!', true);
+  }
+
+  function addGalleryItem() {
+    const img = document.querySelector('#uploadZone img');
+    if (!img) return;
+    const items = document.getElementById('galleryItems');
+    const item = document.createElement('div');
+    item.className = 'gallery-item';
+    const dur = document.querySelector('.tab.active')?.textContent || '5초';
+    item.innerHTML = `<img src="${img.src}" alt="result" /><span class="gallery-duration">${dur}</span>`;
+    items.insertBefore(item, items.firstChild);
+  }
+
+  // ── Toast ──
+  let toastTimer;
+  function showToast(msg, success = false) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast show' + (success ? ' success' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.className = 'toast'; }, 2800);
+  }
+
+  // ── Nav active ──
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', e => {
+      e.preventDefault();
+      document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>

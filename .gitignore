@@ -1,0 +1,78 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/install-state.gz
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+
+# env files
+.env*.local
+.env
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# remotion
+/out/
+*.mp4
+
+# data
+/data/
+
+# worktree
+/worktree/
+
+# 투명자막도구 (로컬 전용, 대용량 바이너리)
+/투명자막도구/
+
+# 다운로드 영상 (대용량, 로컬 전용)
+/output/down/
+
+# test artifacts
+playwright-report/
+test-results/
+.ruff_cache/
+e2e-test-output.log
+
+# .agents/ 는 .claude/ 의 자동 생성 미러 (sync-agents.sh) — 중복 tracking 방지
+/.agents/
+
+# 대용량 input 바이너리 (로컬 전용)
+/input/hwpx/
+/input/shot/
+/input/pixl/
+/input/reat/
+
+# 생성 산출물 (temp, output)
+/output/pptx/
+/output/reat/
+/output/pixl/
+/output/hwpx/
+/output/shot/
+/temp/
+
+# autoresearch 실험 작업 디렉토리 (로컬 전용)
+/autoresearch-runs/
+
+# Playwright MCP 임시
+/.playwright-mcp/

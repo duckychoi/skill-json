@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(C:/Anaconda3/python.exe:*)",
+      "Bash(npx remotion:*)",
+      "Bash(npx playwright:*)",
+      "Bash(yt-dlp:*)",
+      "Bash(node:*)",
+      "Bash(curl:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(/d/product/skill-json/temp/yt-dlp-new.exe:*)",
+      "Bash(/d/product/skill-json/temp/gallery-dl.exe:*)",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_network_requests",
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "mcp__plugin_playwright_playwright__browser_take_screenshot",
+      "mcp__plugin_playwright_playwright__browser_wait_for",
+      "Bash(gh api:*)",
+      "Bash(python3 -c \"import sys,base64; print\\(base64.b64decode\\(sys.stdin.read\\(\\)\\).decode\\(\\)\\)\")",
+      "Bash(python3 -c \"import sys,base64; sys.stdout.buffer.write\\(base64.b64decode\\(sys.stdin.read\\(\\)\\)\\)\")",
+      "Bash(claude mcp:*)",
+      "Bash(npx notebooklm-mcp@latest:*)",
+      "Bash(start:*)",
+      "Bash(netstat -ano)",
+      "Bash(xargs -r kill -9)",
+      "Bash(taskkill //F //IM node.exe)",
+      "WebFetch(domain:ui.shadcn.com)",
+      "WebFetch(domain:component.gallery)",
+      "Bash(cp:*)",
+      "Bash(data/\" | head -30)",
+      "Bash(grep \"\\\\\"data/\\\\|'data/\\\\|`data/\" | head -30)",
+      "Bash(git:*)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "gemini",
+    "context7",
+    "playwright"
+  ]
+}

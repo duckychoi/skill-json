@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FrameAI — AI 이미지 에디터</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg-base:    #0c0e12;
+    --bg-surface: #13181e;
+    --bg-panel:   #121213;
+    --bg-card:    #1f2223;
+    --bg-hover:   #1f2627;
+    --accent:     #3ca2f6;
+    --accent-dim: #2181d4;
+    --text-primary:   #ffffff;
+    --text-secondary: #b3b5b7;
+    --text-muted:     #6c7174;
+    --border:     #2a2f35;
+    --border-light: #333a42;
+    --radius-sm: 8px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-pill: 9999px;
+  }
+  html, body { height: 100%; font-family: 'Pretendard', 'Noto Sans KR', -apple-system, sans-serif; background: var(--bg-base); color: var(--text-primary); overflow: hidden; }
+
+  /* HEADER */
+  header {
+    position: fixed; top: 0; left: 0; right: 0; height: 60px;
+    background: var(--bg-surface); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 20px; z-index: 100;
+  }
+  .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .logo-icon { width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, #3ca2f6, #7c3aed); display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; color: #fff; }
+  .logo-text { font-size: 18px; font-weight: 700; color: #fff; letter-spacing: -0.3px; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .btn-ghost { background: none; border: none; color: var(--text-secondary); font-size: 14px; cursor: pointer; padding: 6px 12px; border-radius: var(--radius-sm); transition: color .15s, background .15s; }
+  .btn-ghost:hover { color: #fff; background: var(--bg-hover); }
+  .btn-primary { background: var(--accent); border: none; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; padding: 8px 20px; border-radius: var(--radius-pill); transition: background .15s; }
+  .btn-primary:hover { background: var(--accent-dim); }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #3ca2f6, #7c3aed); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; cursor: pointer; }
+
+  /* LAYOUT */
+  .app-layout { display: flex; height: 100vh; padding-top: 60px; }
+
+  /* SIDEBAR */
+  aside { width: 242px; flex-shrink: 0; background: var(--bg-surface); border-right: 1px solid var(--border); padding: 16px 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+  .sidebar-section-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .8px; padding: 12px 8px 6px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: var(--radius-md); font-size: 14px; color: var(--text-secondary); cursor: pointer; text-decoration: none; transition: background .13s, color .13s; }
+  .nav-item:hover { background: var(--bg-hover); color: #fff; }
+  .nav-item.active { background: var(--bg-card); color: #fff; }
+  .nav-icon { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; }
+  .nav-badge { margin-left: auto; font-size: 10px; font-weight: 600; background: var(--accent); color: #fff; padding: 2px 6px; border-radius: var(--radius-pill); }
+  .sidebar-divider { height: 1px; background: var(--border); margin: 8px 4px; }
+
+  /* MAIN */
+  main { flex: 1; display: flex; overflow: hidden; }
+
+  /* LEFT TOOL RAIL */
+  .tool-rail {
+    width: 56px; flex-shrink: 0;
+    background: #0e1115;
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 12px 0; gap: 4px;
+  }
+  .tool-btn {
+    width: 40px; height: 40px; border-radius: var(--radius-sm);
+    background: none; border: none; color: var(--text-muted);
+    cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center;
+    transition: background .13s, color .13s; position: relative;
+  }
+  .tool-btn:hover { background: var(--bg-hover); color: #fff; }
+  .tool-btn.active { background: #1a2e3e; color: var(--accent); }
+  .tool-divider { width: 28px; height: 1px; background: var(--border); margin: 4px 0; }
+  .tool-tooltip {
+    position: absolute; left: calc(100% + 8px); top: 50%; transform: translateY(-50%);
+    background: var(--bg-panel); border: 1px solid var(--border);
+    font-size: 11px; color: var(--text-primary); padding: 4px 8px;
+    border-radius: 6px; white-space: nowrap; pointer-events: none;
+    opacity: 0; transition: opacity .1s;
+  }
+  .tool-btn:hover .tool-tooltip { opacity: 1; }
+
+  /* CENTER PANEL */
+  .center-panel { width: 300px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; }
+  .center-header { padding: 18px 16px 14px; border-bottom: 1px solid var(--border); }
+  .center-header h1 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+  .center-header p { font-size: 12px; color: var(--text-muted); }
+  .center-body { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+
+  /* edit mode tabs */
+  .mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .mode-tab {
+    padding: 10px 8px; border-radius: var(--radius-md); border: 1px solid var(--border);
+    background: var(--bg-card); font-size: 12px; color: var(--text-secondary);
+    cursor: pointer; text-align: center; transition: all .13s;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .mode-tab .mode-icon { font-size: 20px; }
+  .mode-tab:hover { border-color: var(--border-light); color: #fff; }
+  .mode-tab.active { background: #1a2e3e; border-color: var(--accent); color: var(--accent); }
+
+  /* field */
+  .field { display: flex; flex-direction: column; gap: 8px; }
+  .field-label { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .field-hint { font-size: 11px; color: var(--text-muted); }
+  textarea.prompt-input { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text-primary); font-size: 13px; padding: 10px 12px; resize: vertical; min-height: 80px; font-family: inherit; line-height: 1.6; transition: border-color .15s; }
+  textarea.prompt-input::placeholder { color: var(--text-muted); }
+  textarea.prompt-input:focus { outline: none; border-color: var(--accent); }
+
+  /* strength slider */
+  .slider-row { display: flex; align-items: center; gap: 10px; }
+  .slider-row input[type=range] { flex: 1; accent-color: var(--accent); cursor: pointer; }
+  .slider-val { font-size: 13px; font-weight: 600; color: var(--accent); min-width: 24px; text-align: right; }
+
+  /* style chips */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 5px 10px; border-radius: var(--radius-pill); background: var(--bg-card); border: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); cursor: pointer; transition: all .13s; }
+  .chip:hover { border-color: var(--border-light); color: #fff; }
+  .chip.active { background: #1a2e3e; border-color: var(--accent); color: var(--accent); }
+
+  /* generate */
+  .btn-generate { background: var(--accent); border: none; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; padding: 13px; border-radius: var(--radius-md); width: 100%; transition: background .15s, transform .1s; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 4px; }
+  .btn-generate:hover { background: var(--accent-dim); }
+  .btn-generate:active { transform: scale(.98); }
+  .btn-generate:disabled { background: #2a3a4a; color: var(--text-muted); cursor: not-allowed; transform: none; }
+
+  /* CANVAS AREA */
+  .canvas-area {
+    flex: 1; display: flex; flex-direction: column; background: #050505;
+    overflow: hidden;
+  }
+  .canvas-toolbar {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    background: #0e1115;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .canvas-toolbar-label { font-size: 13px; font-weight: 600; flex: 1; }
+  .c-btn {
+    background: var(--bg-card); border: 1px solid var(--border); color: var(--text-secondary);
+    font-size: 12px; cursor: pointer; padding: 5px 12px; border-radius: var(--radius-pill);
+    display: flex; align-items: center; gap: 5px; transition: all .13s;
+  }
+  .c-btn:hover { border-color: var(--border-light); color: #fff; }
+  .c-btn.accent { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .c-btn.accent:hover { background: var(--accent-dim); }
+
+  .canvas-body { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+
+  /* split view */
+  .split-container { position: relative; width: 100%; max-width: 680px; aspect-ratio: 4/3; user-select: none; }
+  .split-img { width: 100%; height: 100%; border-radius: var(--radius-lg); overflow: hidden; position: absolute; inset: 0; }
+  .split-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .split-before { clip-path: inset(0 50% 0 0); }
+  .split-after { }
+  .split-after .overlay-mask {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(60,162,246,.12); border: 2px solid rgba(60,162,246,.4);
+    border-radius: var(--radius-lg);
+  }
+  .split-divider {
+    position: absolute; top: 0; bottom: 0; left: 50%; width: 2px;
+    background: var(--accent); cursor: ew-resize; transform: translateX(-50%);
+    z-index: 10;
+  }
+  .split-handle {
+    position: absolute; top: 50%; left: 50%; width: 28px; height: 28px;
+    background: var(--accent); border-radius: 50%; transform: translate(-50%, -50%);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 11px; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,.5);
+  }
+
+  /* empty canvas */
+  .canvas-empty {
+    width: 100%; max-width: 560px; aspect-ratio: 4/3;
+    background: #121213; border: 2px dashed var(--border);
+    border-radius: var(--radius-lg); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    cursor: pointer; transition: border-color .15s;
+  }
+  .canvas-empty:hover { border-color: var(--accent); }
+  .canvas-empty input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .empty-icon { font-size: 40px; opacity: .4; }
+  .empty-text { font-size: 15px; font-weight: 600; color: var(--text-secondary); }
+  .empty-sub { font-size: 12px; color: var(--text-muted); }
+
+  /* progress */
+  .progress-wrap { position: absolute; bottom: 0; left: 0; right: 0; height: 3px; background: var(--border); display: none; }
+  .progress-wrap.show { display: block; }
+  .progress-bar { height: 100%; width: 0%; background: var(--accent); border-radius: 2px; transition: width .4s ease; }
+
+  /* brush cursor */
+  .brush-cursor {
+    position: absolute; border: 2px solid rgba(255,255,255,.7);
+    border-radius: 50%; pointer-events: none; display: none;
+    transform: translate(-50%, -50%); z-index: 20;
+  }
+
+  /* bottom strip */
+  .result-strip { padding: 10px 16px; border-top: 1px solid var(--border); background: #0e1115; }
+  .result-strip-label { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .6px; }
+  .result-items { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+  .result-items::-webkit-scrollbar { height: 4px; }
+  .result-items::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .result-item { flex-shrink: 0; width: 80px; height: 56px; border-radius: 8px; background: var(--bg-card); border: 1px solid var(--border); cursor: pointer; overflow: hidden; transition: border-color .13s; }
+  .result-item:hover { border-color: var(--accent); }
+  .result-item img { width: 100%; height: 100%; object-fit: cover; }
+  .result-add { flex-shrink: 0; width: 80px; height: 56px; border-radius: 8px; background: var(--bg-card); border: 2px dashed var(--border); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--text-muted); transition: border-color .13s; }
+  .result-add:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* toast */
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: #1a2027; border: 1px solid var(--border); color: var(--text-primary); font-size: 14px; padding: 12px 20px; border-radius: var(--radius-pill); box-shadow: 0 8px 32px rgba(0,0,0,.4); transition: transform .3s ease; z-index: 999; pointer-events: none; }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.success { border-color: var(--accent); }
+
+  select.s { background: transparent; border: none; color: var(--text-primary); font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer; outline: none; -webkit-appearance: none; appearance: none; }
+  option { background: #1a2027; }
+  ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="index.html" class="logo">
+    <div class="logo-icon">F</div>
+    <span class="logo-text">FrameAI</span>
+  </a>
+  <div class="header-right">
+    <button class="btn-ghost">요금제</button>
+    <button class="btn-ghost">갤러리</button>
+    <button class="btn-primary">무료로 시작하기</button>
+    <div class="avatar">U</div>
+  </div>
+</header>
+
+<div class="app-layout">
+
+  <!-- SIDEBAR -->
+  <aside>
+    <div class="sidebar-section-label">도구</div>
+    <a href="index.html" class="nav-item"><span class="nav-icon">🧭</span> 탐색</a>
+    <a href="index.html" class="nav-item"><span class="nav-icon">🎬</span> 이미지→동영상</a>
+    <a href="index.html" class="nav-item"><span class="nav-icon">📝</span> 텍스트→동영상</a>
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-section-label">AI 생성</div>
+    <a href="#" class="nav-item"><span class="nav-icon">🖼️</span> AI 이미지 <span class="nav-badge">NEW</span></a>
+    <a href="image-editor.html" class="nav-item active"><span class="nav-icon">✏️</span> AI 이미지 에디터</a>
+    <a href="video-editor.html" class="nav-item"><span class="nav-icon">🎞️</span> AI 비디오 에디터</a>
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-section-label">크리에이터</div>
+    <a href="#" class="nav-item"><span class="nav-icon">🧑‍🎤</span> AI 아바타</a>
+    <a href="#" class="nav-item"><span class="nav-icon">🎵</span> AI 음악</a>
+    <a href="#" class="nav-item"><span class="nav-icon">🔊</span> AI 보이스오버</a>
+    <div class="sidebar-divider"></div>
+    <a href="#" class="nav-item"><span class="nav-icon">⚙️</span> 설정</a>
+  </aside>
+
+  <main>
+
+    <!-- TOOL RAIL -->
+    <div class="tool-rail">
+      <button class="tool-btn active" onclick="setTool(this,'선택')">
+        ↖
+        <span class="tool-tooltip">선택</span>
+      </button>
+      <button class="tool-btn" onclick="setTool(this,'브러시')">
+        🖌
+        <span class="tool-tooltip">브러시 (마스크)</span>
+      </button>
+      <button class="tool-btn" onclick="setTool(this,'지우개')">
+        ◻
+        <span class="tool-tooltip">지우개</span>
+      </button>
+      <button class="tool-btn" onclick="setTool(this,'올가미')">
+        ⬡
+        <span class="tool-tooltip">올가미 선택</span>
+      </button>
+      <div class="tool-divider"></div>
+      <button class="tool-btn" onclick="setTool(this,'자르기')">
+        ✂
+        <span class="tool-tooltip">자르기</span>
+      </button>
+      <button class="tool-btn" onclick="setTool(this,'이동')">
+        ✥
+        <span class="tool-tooltip">이동</span>
+      </button>
+      <button class="tool-btn" onclick="setTool(this,'텍스트')">
+        T
+        <span class="tool-tooltip">텍스트 추가</span>
+      </button>
+      <div class="tool-divider"></div>
+      <button class="tool-btn" onclick="setTool(this,'확대')">
+        🔍
+        <span class="tool-tooltip">확대/축소</span>
+      </button>
+      <button class="tool-btn" onclick="setTool(this,'히스토리')">
+        ↩
+        <span class="tool-tooltip">실행 취소</span>
+      </button>
+    </div>
+
+    <!-- CENTER PANEL -->
+    <div class="center-panel">
+      <div class="center-header">
+        <h1>AI 이미지 에디터</h1>
+        <p>AI로 이미지를 자유롭게 편집하세요</p>
+      </div>
+      <div class="center-body">
+
+        <!-- 편집 모드 -->
+        <div class="field">
+          <div class="field-label">편집 모드</div>
+          <div class="mode-tabs">
+            <div class="mode-tab active" onclick="setMode(this,'inpaint')">
+              <span class="mode-icon">🎨</span>
+              인페인트
+            </div>
+            <div class="mode-tab" onclick="setMode(this,'remove')">
+              <span class="mode-icon">🗑️</span>
+              객체 제거
+            </div>
+            <div class="mode-tab" onclick="setMode(this,'bg')">
+              <span class="mode-icon">🌄</span>
+              배경 제거
+            </div>
+            <div class="mode-tab" onclick="setMode(this,'expand')">
+              <span class="mode-icon">⤢</span>
+              이미지 확장
+            </div>
+            <div class="mode-tab" onclick="setMode(this,'enhance')">
+              <span class="mode-icon">✨</span>
+              화질 향상
+            </div>
+            <div class="mode-tab" onclick="setMode(this,'style')">
+              <span class="mode-icon">🖼️</span>
+              스타일 변환
+            </div>
+          </div>
+        </div>
+
+        <!-- Prompt -->
+        <div class="field" id="promptField">
+          <div class="field-label">AI 프롬프트</div>
+          <div class="field-hint">마스크 영역에 생성할 내용을 설명하세요</div>
+          <textarea class="prompt-input" id="promptInput" placeholder="예: 푸른 하늘과 구름, 현대적인 카페 인테리어..."></textarea>
+        </div>
+
+        <!-- Brush size (인페인트 모드) -->
+        <div class="field" id="brushField">
+          <div class="field-label">브러시 크기</div>
+          <div class="slider-row">
+            <input type="range" min="10" max="120" value="40" oninput="document.getElementById('brushVal').textContent=this.value+'px'" />
+            <span class="slider-val" id="brushVal">40px</span>
+          </div>
+        </div>
+
+        <!-- Strength -->
+        <div class="field">
+          <div class="field-label">변형 강도</div>
+          <div class="slider-row">
+            <input type="range" min="1" max="10" value="7" oninput="document.getElementById('strengthVal').textContent=this.value" />
+            <span class="slider-val" id="strengthVal">7</span>
+          </div>
+        </div>
+
+        <!-- Style chips -->
+        <div class="field" id="styleField">
+          <div class="field-label">스타일 프리셋</div>
+          <div class="chips">
+            <div class="chip active" onclick="toggleChip(this)">자연스럽게</div>
+            <div class="chip" onclick="toggleChip(this)">애니메이션</div>
+            <div class="chip" onclick="toggleChip(this)">유화</div>
+            <div class="chip" onclick="toggleChip(this)">수채화</div>
+            <div class="chip" onclick="toggleChip(this)">픽셀아트</div>
+            <div class="chip" onclick="toggleChip(this)">3D 렌더</div>
+          </div>
+        </div>
+
+        <!-- Quality -->
+        <div class="field">
+          <div class="field-label">출력 품질</div>
+          <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;">
+            <select class="s" style="width:100%;">
+              <option>V2.5 Pro — 최고 품질</option>
+              <option>V2.5 Standard — 균형</option>
+              <option>V2.0 Fast — 빠른 생성</option>
+            </select>
+          </div>
+        </div>
+
+        <button class="btn-generate" id="generateBtn" onclick="startGenerate()">
+          <span>✦</span> 편집 적용
+        </button>
+        <div style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;color:var(--text-muted);">
+          <span style="color:var(--accent);font-weight:600;">12</span> 크레딧 남음
+        </div>
+
+      </div>
+    </div>
+
+    <!-- CANVAS AREA -->
+    <div class="canvas-area">
+      <div class="canvas-toolbar">
+        <span class="canvas-toolbar-label" id="canvasTitle">이미지를 업로드하세요</span>
+        <button class="c-btn" onclick="toggleSplit()" id="splitBtn" style="display:none;">◑ 비교</button>
+        <button class="c-btn" onclick="showToast('다운로드 시작됩니다', true)" id="downloadBtn" style="display:none;">⬇ 저장</button>
+        <button class="c-btn" onclick="document.getElementById('mainFileInput').click()">+ 이미지 업로드</button>
+        <button class="c-btn accent" onclick="startGenerate()">✦ 생성</button>
+        <input type="file" id="mainFileInput" accept="image/*" style="display:none;" onchange="loadMainImage(this)" />
+      </div>
+
+      <div class="canvas-body" id="canvasBody">
+        <!-- empty state -->
+        <div class="canvas-empty" id="canvasEmpty" onclick="document.getElementById('mainFileInput').click()">
+          <input type="file" accept="image/*" onchange="loadMainImage(this)" />
+          <div class="empty-icon">🖼️</div>
+          <div class="empty-text">이미지를 업로드하거나 드래그하세요</div>
+          <div class="empty-sub">JPG, PNG, WEBP, HEIC · 최대 20MB</div>
+        </div>
+
+        <!-- canvas with image (hidden initially) -->
+        <div class="split-container" id="splitContainer" style="display:none;">
+          <div class="split-img split-after" id="afterImg">
+            <canvas id="editCanvas" style="width:100%;height:100%;display:block;border-radius:14px;"></canvas>
+            <div class="overlay-mask" id="overlayMask" style="display:none;"></div>
+          </div>
+          <div class="split-img split-before" id="beforeImg" style="display:none;">
+            <img id="beforeImage" src="" alt="원본" />
+          </div>
+          <div class="split-divider" id="splitDivider" style="display:none;" onmousedown="startDrag(event)">
+            <div class="split-handle">⇔</div>
+          </div>
+        </div>
+
+        <!-- generating overlay -->
+        <div id="generatingOverlay" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;border-radius:14px;">
+          <div style="width:48px;height:48px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--accent);animation:spin 1s linear infinite;"></div>
+          <div style="font-size:14px;font-weight:600;" id="genLabel">AI 분석 중...</div>
+          <div style="font-size:12px;color:var(--text-muted);">잠시만 기다려 주세요</div>
+        </div>
+
+        <div class="progress-wrap" id="progressWrap">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+
+        <div class="brush-cursor" id="brushCursor"></div>
+      </div>
+
+      <div class="result-strip">
+        <div class="result-strip-label">히스토리</div>
+        <div class="result-items" id="resultItems">
+          <div class="result-add" onclick="document.getElementById('mainFileInput').click()">+</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+<script>
+let currentTool = '선택';
+let currentMode = 'inpaint';
+let hasImage = false;
+let splitMode = false;
+let generating = false;
+let img = null;
+
+// ── Tool ──
+function setTool(el, name) {
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  currentTool = name;
+  updateBrushCursor();
+}
+
+function updateBrushCursor() {
+  const cursor = document.getElementById('brushCursor');
+  if (currentTool === '브러시' && hasImage) {
+    cursor.style.display = 'block';
+    cursor.style.width = '40px';
+    cursor.style.height = '40px';
+  } else {
+    cursor.style.display = 'none';
+  }
+}
+
+// ── Mode ──
+function setMode(el, mode) {
+  document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  currentMode = mode;
+  // adjust prompt hint
+  const hints = {
+    inpaint: '마스크 영역에 생성할 내용을 설명하세요',
+    remove: '제거할 객체를 브러시로 마스킹하세요',
+    bg: '배경이 자동으로 제거됩니다 (프롬프트로 새 배경 지정 가능)',
+    expand: '이미지를 확장할 방향과 내용을 설명하세요',
+    enhance: '화질을 자동으로 향상합니다',
+    style: '원하는 스타일을 설명하세요',
+  };
+  document.querySelector('.field-hint').textContent = hints[mode] || '';
+  document.getElementById('promptField').style.display = ['enhance','bg'].includes(mode) ? 'none' : 'flex';
+  document.getElementById('brushField').style.display = ['inpaint','remove'].includes(mode) ? 'flex' : 'none';
+  document.getElementById('styleField').style.display = mode === 'style' ? 'flex' : 'none';
+}
+
+// ── Load image ──
+function loadMainImage(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    img = new Image();
+    img.onload = () => {
+      const canvas = document.getElementById('editCanvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      document.getElementById('beforeImage').src = e.target.result;
+      document.getElementById('canvasEmpty').style.display = 'none';
+      document.getElementById('splitContainer').style.display = 'block';
+      document.getElementById('splitBtn').style.display = 'flex';
+      document.getElementById('canvasTitle').textContent = file.name;
+      hasImage = true;
+      addHistory(e.target.result);
+      showToast('이미지가 로드되었습니다', true);
+      updateBrushCursor();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Brush cursor tracking ──
+document.addEventListener('mousemove', (e) => {
+  if (currentTool !== '브러시' || !hasImage) return;
+  const cursor = document.getElementById('brushCursor');
+  cursor.style.left = e.clientX + 'px';
+  cursor.style.top = e.clientY + 'px';
+});
+
+// ── Split compare ──
+function toggleSplit() {
+  splitMode = !splitMode;
+  document.getElementById('beforeImg').style.display = splitMode ? 'block' : 'none';
+  document.getElementById('splitDivider').style.display = splitMode ? 'block' : 'none';
+  document.getElementById('overlayMask').style.display = splitMode ? 'none' : 'none';
+  document.getElementById('splitBtn').textContent = splitMode ? '✕ 비교 종료' : '◑ 비교';
+}
+
+let dragging = false;
+function startDrag(e) {
+  dragging = true;
+  e.preventDefault();
+}
+document.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const body = document.getElementById('canvasBody');
+  const rect = body.getBoundingClientRect();
+  let pct = ((e.clientX - rect.left) / rect.width) * 100;
+  pct = Math.max(5, Math.min(95, pct));
+  document.getElementById('beforeImg').style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
+  document.getElementById('splitDivider').style.left = pct + '%';
+});
+document.addEventListener('mouseup', () => { dragging = false; });
+
+// ── Generate ──
+function startGenerate() {
+  if (!hasImage) { showToast('이미지를 먼저 업로드하세요'); return; }
+  if (generating) return;
+  generating = true;
+
+  const btn = document.getElementById('generateBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span style="display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;vertical-align:middle;margin-right:6px;"></span> 생성 중...';
+
+  document.getElementById('generatingOverlay').style.display = 'flex';
+  document.getElementById('progressWrap').classList.add('show');
+
+  const stages = [
+    { w: 20, label: '이미지 분석 중...' },
+    { w: 50, label: 'AI 모델 처리 중...' },
+    { w: 80, label: '디테일 정제 중...' },
+    { w: 100, label: '완료!' },
+  ];
+  let i = 0;
+  const bar = document.getElementById('progressBar');
+  const label = document.getElementById('genLabel');
+
+  function next() {
+    if (i >= stages.length) { finishGenerate(); return; }
+    bar.style.width = stages[i].w + '%';
+    label.textContent = stages[i].label;
+    i++;
+    setTimeout(next, 700 + Math.random() * 600);
+  }
+  next();
+}
+
+function finishGenerate() {
+  generating = false;
+  document.getElementById('generatingOverlay').style.display = 'none';
+  document.getElementById('progressWrap').classList.remove('show');
+  document.getElementById('progressBar').style.width = '0%';
+
+  // apply a hue-rotation filter to simulate AI edit
+  const canvas = document.getElementById('editCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.filter = 'saturate(1.2) contrast(1.05)';
+  ctx.drawImage(img, 0, 0);
+  ctx.filter = 'none';
+
+  const btn = document.getElementById('generateBtn');
+  btn.disabled = false;
+  btn.innerHTML = '<span>✦</span> 편집 적용';
+  document.getElementById('downloadBtn').style.display = 'flex';
+
+  addHistory(canvas.toDataURL());
+  showToast('편집이 완료되었습니다!', true);
+}
+
+function addHistory(src) {
+  const items = document.getElementById('resultItems');
+  const item = document.createElement('div');
+  item.className = 'result-item';
+  item.innerHTML = `<img src="${src}" alt="history" />`;
+  item.onclick = () => {
+    const img2 = new Image();
+    img2.onload = () => {
+      const canvas = document.getElementById('editCanvas');
+      canvas.width = img2.naturalWidth;
+      canvas.height = img2.naturalHeight;
+      canvas.getContext('2d').drawImage(img2, 0, 0);
+    };
+    img2.src = src;
+  };
+  items.insertBefore(item, items.firstChild);
+}
+
+// ── Chip ──
+function toggleChip(el) {
+  el.classList.toggle('active');
+}
+
+// ── Toast ──
+let toastTimer;
+function showToast(msg, success = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (success ? ' success' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.className = 'toast', 2800);
+}
+
+// ── Nav ──
+document.querySelectorAll('.nav-item').forEach(item => {
+  if (!item.getAttribute('href') || item.getAttribute('href') === '#') {
+    item.addEventListener('click', e => e.preventDefault());
+  }
+});
+
+// hide prompt/brush fields for default mode init
+setMode(document.querySelector('.mode-tab.active'), 'inpaint');
+</script>
+</body>
+</html>

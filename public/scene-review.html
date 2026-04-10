@@ -1,0 +1,2062 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VideoGen Scene Review</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: { primary: '#0A0A0A', secondary: '#141414', tertiary: '#1E1E1E', hover: '#252525' },
+            accent: { blue: '#4A9EFF', green: '#00FF88', red: '#FF4444', orange: '#FFB04A', gold: '#FFFFFF' },
+            txt: { primary: '#FFFFFF', secondary: '#888888', muted: '#555555' },
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background: #0A0A0A; color: #E0E0E0; font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #141414; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+    .scene-card { transition: all 0.15s ease; }
+    .scene-card:hover { border-color: #4A9EFF40; background: #1A1A1A; }
+    .scene-list-item { transition: all 0.15s ease; cursor: pointer; }
+    .scene-list-item:hover { background: #1A1A1A; }
+    .scene-list-item.selected { background: #1E2A3A; border-color: #4A9EFF40; }
+    .split-btn { opacity: 0; transition: opacity 0.15s; }
+    .scene-card:hover .split-btn { opacity: 1; }
+    .move-btn { opacity: 0; transition: opacity 0.15s; }
+    .scene-card:hover .move-btn { opacity: 1; }
+    .merge-zone { transition: all 0.15s; }
+    .merge-zone:hover { background: #1E1E1E; }
+    .toast-enter { animation: slideUp 0.3s ease; }
+    .toast-exit { animation: fadeOut 0.3s ease forwards; }
+    @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+    .timeline-seg { transition: all 0.2s; cursor: pointer; }
+    .timeline-seg:hover { filter: brightness(1.4); }
+    .undo-bar { animation: slideUp 0.2s ease; }
+    .gap-warn { border-left: 2px solid #FFB04A; }
+    .tab-btn { transition: color 0.15s, border-color 0.15s; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef, useMemo } = React;
+
+    // ─── Utility Functions ───────────────────────────────────
+    const API_BASE = '';
+
+    function formatTime(sec) {
+      if (sec == null || isNaN(sec)) return '0:00.00';
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return m + ':' + s.toFixed(2).padStart(5, '0');
+    }
+
+    function formatDuration(sec) {
+      if (sec == null || isNaN(sec)) return '0.0초';
+      return sec.toFixed(1) + '초';
+    }
+
+    function totalDuration(scenes) {
+      if (!scenes.length) return 0;
+      return scenes[scenes.length - 1].endTime - scenes[0].startTime;
+    }
+
+    function totalSubtitles(scenes) {
+      return scenes.reduce((sum, s) => sum + (s.subtitles?.length || 0), 0);
+    }
+
+    function renumberScenes(scenes) {
+      return scenes.map((s, i) => ({ ...s, id: 'scene-' + (i + 1) }));
+    }
+
+    function recalcTiming(scene) {
+      if (!scene.subtitles || scene.subtitles.length === 0) return scene;
+      const st = scene.subtitles[0].startTime;
+      const et = scene.subtitles[scene.subtitles.length - 1].endTime;
+      return { ...scene, startTime: st, endTime: et, duration: et - st };
+    }
+
+    function detectGaps(scene) {
+      const subs = scene.subtitles || [];
+      if (subs.length < 2) return [];
+      const gaps = [];
+      for (let i = 0; i < subs.length - 1; i++) {
+        const gap = subs[i + 1].startTime - subs[i].endTime;
+        gaps.push({ index: i, gap });
+      }
+      if (gaps.length === 0) return [];
+      const sorted = gaps.map(g => g.gap).sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)];
+      const threshold = median * 2;
+      return gaps.filter(g => g.gap > threshold && g.gap > 0.5);
+    }
+
+    // ─── Core Operations ─────────────────────────────────────
+    function splitScene(scenes, sceneIdx, splitSubIdx) {
+      const scene = scenes[sceneIdx];
+      const subsA = scene.subtitles.slice(0, splitSubIdx);
+      const subsB = scene.subtitles.slice(splitSubIdx);
+      if (subsA.length === 0 || subsB.length === 0) return scenes;
+
+      const sceneA = recalcTiming({
+        ...scene,
+        subtitles: subsA,
+        title: subsA[0].text.slice(0, 25),
+        keywords: [],
+      });
+      const sceneB = recalcTiming({
+        ...scene,
+        subtitles: subsB,
+        title: subsB[0].text.slice(0, 25),
+        keywords: [],
+        userImage: undefined,
+        userImageStyle: undefined,
+      });
+
+      const next = [...scenes];
+      next.splice(sceneIdx, 1, sceneA, sceneB);
+      return renumberScenes(next);
+    }
+
+    function mergeScenes(scenes, idxA, idxB) {
+      if (idxA < 0 || idxB >= scenes.length) return scenes;
+      const a = scenes[idxA];
+      const b = scenes[idxB];
+      const mergedSubs = [...a.subtitles, ...b.subtitles];
+      if (mergedSubs.length > 10) return scenes; // constraint
+
+      const merged = recalcTiming({
+        ...a,
+        subtitles: mergedSubs,
+        title: a.title,
+        keywords: [...(a.keywords || []), ...(b.keywords || [])],
+      });
+
+      const next = [...scenes];
+      next.splice(idxA, 2, merged);
+      return renumberScenes(next);
+    }
+
+    function moveSubtitle(scenes, fromSceneIdx, direction) {
+      // direction: 'up' = move first subtitle to previous scene
+      // direction: 'down' = move last subtitle to next scene
+      const from = scenes[fromSceneIdx];
+      if (!from || from.subtitles.length < 2) return scenes;
+
+      const next = scenes.map(s => ({ ...s, subtitles: [...s.subtitles] }));
+
+      if (direction === 'up' && fromSceneIdx > 0) {
+        const sub = next[fromSceneIdx].subtitles.shift();
+        next[fromSceneIdx - 1].subtitles.push(sub);
+        if (next[fromSceneIdx - 1].subtitles.length > 10) return scenes;
+      } else if (direction === 'down' && fromSceneIdx < scenes.length - 1) {
+        const sub = next[fromSceneIdx].subtitles.pop();
+        next[fromSceneIdx + 1].subtitles.unshift(sub);
+        if (next[fromSceneIdx + 1].subtitles.length > 10) return scenes;
+      } else {
+        return scenes;
+      }
+
+      return renumberScenes(next.map(recalcTiming));
+    }
+
+    // ─── Toast ───────────────────────────────────────────────
+    function Toast({ message, type, onDone }) {
+      useEffect(() => {
+        const t = setTimeout(onDone, 2500);
+        return () => clearTimeout(t);
+      }, [onDone]);
+
+      const colors = {
+        success: 'bg-accent-green/20 border-accent-green text-accent-green',
+        error: 'bg-accent-red/20 border-accent-red text-accent-red',
+        info: 'bg-accent-blue/20 border-accent-blue text-accent-blue',
+      };
+
+      return (
+        <div className={`toast-enter fixed bottom-6 right-6 z-50 px-4 py-3 rounded-lg border ${colors[type] || colors.info} text-sm font-medium shadow-lg`}>
+          {message}
+        </div>
+      );
+    }
+
+    // ─── Timeline MiniBar ────────────────────────────────────
+    function TimelineMiniBar({ scenes, scrollToScene }) {
+      const total = totalDuration(scenes);
+      if (total === 0) return null;
+
+      const colors = [
+        '#4A9EFF', '#00FF88', '#FFFFFF', '#FF4444', '#A78BFA',
+        '#F472B6', '#34D399', '#FBBF24', '#60A5FA', '#FB923C',
+      ];
+
+      return (
+        <div className="flex h-6 rounded overflow-hidden gap-px bg-bg-primary mx-4 mb-3">
+          {scenes.map((s, i) => {
+            const w = ((s.duration || 0) / total) * 100;
+            return (
+              <div
+                key={s.id}
+                className="timeline-seg relative group"
+                style={{ width: w + '%', minWidth: '2px', background: colors[i % colors.length] + '80' }}
+                onClick={() => scrollToScene(i)}
+                title={`#${i + 1} ${s.title} (${formatDuration(s.duration)})`}
+              >
+                <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-bg-tertiary text-txt-secondary text-xs px-2 py-1 rounded whitespace-nowrap hidden group-hover:block z-10 pointer-events-none">
+                  #{i + 1} {formatDuration(s.duration)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // ─── SubtitleRow ─────────────────────────────────────────
+    function SubtitleRow({ sub, isFirst, isLast, sceneIdx, scenesCount, subCount, onMoveUp, onMoveDown, hasGap, gapValue }) {
+      return (
+        <div className={`${hasGap ? 'gap-warn pl-2 ml-1' : ''}`}>
+          {hasGap && (
+            <div className="flex items-center gap-1.5 py-0.5 mb-0.5">
+              <span className="text-accent-orange text-xs">&#9888; 갭 {gapValue.toFixed(2)}초</span>
+            </div>
+          )}
+          <div className="flex items-center group py-1.5 px-3 rounded hover:bg-bg-tertiary/50">
+            <span className="text-txt-muted text-xs font-mono w-16 shrink-0">{formatTime(sub.startTime)}</span>
+            <span className="text-txt-primary text-sm flex-1 leading-relaxed">{sub.text}</span>
+            <div className="flex gap-1 shrink-0 ml-2">
+              {isFirst && sceneIdx > 0 && subCount > 1 && (
+                <button
+                  className="move-btn text-xs px-2 py-0.5 rounded bg-bg-tertiary text-txt-secondary hover:bg-accent-blue/20 hover:text-accent-blue transition-colors"
+                  onClick={onMoveUp}
+                  title="이전 씬으로 이동"
+                >&#8593;이동</button>
+              )}
+              {isLast && sceneIdx < scenesCount - 1 && subCount > 1 && (
+                <button
+                  className="move-btn text-xs px-2 py-0.5 rounded bg-bg-tertiary text-txt-secondary hover:bg-accent-blue/20 hover:text-accent-blue transition-colors"
+                  onClick={onMoveDown}
+                  title="다음 씬으로 이동"
+                >&#8595;이동</button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── SplitButton ─────────────────────────────────────────
+    function SplitButton({ onClick }) {
+      return (
+        <div className="split-btn flex items-center px-3 py-0.5 group/split">
+          <div className="flex-1 border-t border-dashed border-txt-muted/30" />
+          <button
+            className="mx-3 text-xs px-3 py-0.5 rounded-full bg-bg-tertiary text-txt-muted hover:bg-accent-blue/20 hover:text-accent-blue transition-colors border border-transparent hover:border-accent-blue/30"
+            onClick={onClick}
+          >나누기</button>
+          <div className="flex-1 border-t border-dashed border-txt-muted/30" />
+        </div>
+      );
+    }
+
+    // ─── SceneStrip ──────────────────────────────────────────
+    function SceneStrip({ scene, sceneIdx, scenesCount, onSplit, onMoveUp, onMoveDown, sceneRef }) {
+      const gaps = useMemo(() => detectGaps(scene), [scene]);
+      const gapMap = useMemo(() => {
+        const m = {};
+        gaps.forEach(g => { m[g.index + 1] = g.gap; });
+        return m;
+      }, [gaps]);
+
+      const subs = scene.subtitles || [];
+
+      return (
+        <div ref={sceneRef} className="scene-card border border-txt-muted/10 rounded-lg bg-bg-secondary overflow-hidden">
+          {/* Scene Header */}
+          <div className="flex items-center gap-3 px-4 py-2.5 bg-bg-tertiary/50 border-b border-txt-muted/10">
+            <span className="text-accent-blue font-bold text-sm">#{sceneIdx + 1}</span>
+            <span className="text-txt-secondary text-xs px-2 py-0.5 bg-bg-tertiary rounded font-mono">{scene.layoutType}</span>
+            <span className="text-txt-muted text-xs">{subs.length}자막</span>
+            <span className="text-txt-muted text-xs">{formatDuration(scene.duration)}</span>
+            <span className="text-txt-muted text-xs ml-auto font-mono">{formatTime(scene.startTime)} - {formatTime(scene.endTime)}</span>
+          </div>
+
+          {/* Subtitle Rows with Split Buttons */}
+          <div className="py-1">
+            {subs.map((sub, subIdx) => (
+              <React.Fragment key={sub.index || subIdx}>
+                <SubtitleRow
+                  sub={sub}
+                  isFirst={subIdx === 0}
+                  isLast={subIdx === subs.length - 1}
+                  sceneIdx={sceneIdx}
+                  scenesCount={scenesCount}
+                  subCount={subs.length}
+                  onMoveUp={() => onMoveUp(sceneIdx)}
+                  onMoveDown={() => onMoveDown(sceneIdx)}
+                  hasGap={!!gapMap[subIdx]}
+                  gapValue={gapMap[subIdx] || 0}
+                />
+                {subIdx < subs.length - 1 && (
+                  <SplitButton onClick={() => onSplit(sceneIdx, subIdx + 1)} />
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── MergeBoundary ───────────────────────────────────────
+    function MergeBoundary({ sceneA, sceneB, idxA, onMerge }) {
+      const gap = sceneB.startTime - sceneA.endTime;
+      const mergedCount = (sceneA.subtitles?.length || 0) + (sceneB.subtitles?.length || 0);
+      const canMerge = mergedCount <= 10;
+
+      return (
+        <div className="merge-zone flex items-center gap-2 px-4 py-1.5 mx-2 rounded group">
+          <div className="flex-1 border-t-2 border-txt-muted/20" />
+          <button
+            className={`text-xs px-3 py-1 rounded-full transition-colors border ${
+              canMerge
+                ? 'bg-bg-tertiary text-txt-muted hover:bg-accent-green/20 hover:text-accent-green border-transparent hover:border-accent-green/30'
+                : 'bg-bg-tertiary text-txt-muted/40 border-transparent cursor-not-allowed'
+            }`}
+            onClick={() => canMerge && onMerge(idxA, idxA + 1)}
+            disabled={!canMerge}
+            title={canMerge ? '두 씬 병합' : `병합 시 ${mergedCount}자막 (최대 10)`}
+          >병합</button>
+          <span className="text-txt-muted/50 text-xs font-mono">갭 {gap.toFixed(2)}초</span>
+          <div className="flex-1 border-t-2 border-txt-muted/20" />
+        </div>
+      );
+    }
+
+    // ─── UndoBar ─────────────────────────────────────────────
+    function UndoBar({ undoCount, onUndo }) {
+      if (undoCount === 0) return null;
+      return (
+        <div className="undo-bar fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-bg-secondary border border-txt-muted/20 rounded-lg px-4 py-2.5 shadow-xl">
+          <span className="text-txt-secondary text-sm">변경 {undoCount}건</span>
+          <button
+            className="text-sm px-3 py-1 rounded bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30 transition-colors"
+            onClick={onUndo}
+          >&#8630; 되돌리기 (Ctrl+Z)</button>
+        </div>
+      );
+    }
+
+    // ─── Header ──────────────────────────────────────────────
+    function Header({ scenes, hasChanges, onSave, saving }) {
+      const dur = totalDuration(scenes);
+      const m = Math.floor(dur / 60);
+      const s = Math.floor(dur % 60);
+
+      return (
+        <div className="sticky top-0 z-30 bg-bg-primary/95 backdrop-blur border-b border-txt-muted/10 px-4 py-3">
+          <div className="max-w-7xl mx-auto flex items-center gap-4">
+            <h1 className="text-txt-primary text-lg font-bold">씬 리뷰</h1>
+            <div className="flex items-center gap-2 text-txt-secondary text-sm">
+              <span>{scenes.length} 씬</span>
+              <span className="text-txt-muted">&#183;</span>
+              <span>{totalSubtitles(scenes)} 자막</span>
+              <span className="text-txt-muted">&#183;</span>
+              <span>{m}:{String(s).padStart(2, '0')}</span>
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                className={`text-sm px-4 py-1.5 rounded-lg transition-colors font-medium ${
+                  hasChanges
+                    ? 'bg-accent-blue text-white hover:bg-accent-blue/80'
+                    : 'bg-bg-tertiary text-txt-muted cursor-default'
+                }`}
+                onClick={onSave}
+                disabled={!hasChanges || saving}
+              >{saving ? '저장 중...' : hasChanges ? '저장 (Ctrl+S)' : '저장됨'}</button>
+              <a
+                href="/editor.html"
+                className="text-sm px-3 py-1.5 rounded-lg bg-bg-tertiary text-txt-secondary hover:text-txt-primary hover:bg-bg-hover transition-colors"
+              >에디터 &#8594;</a>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── TabBar ──────────────────────────────────────────────
+    function TabBar({ activeTab, onTabChange }) {
+      const tabs = [
+        { id: 'structure', label: '구조' },
+        { id: 'meaning',   label: '의미' },
+        { id: 'preview',   label: '미리보기' },
+      ];
+
+      return (
+        <div style={{ display: 'flex', borderBottom: '1px solid #2A2A2A', padding: '0 0', background: '#0A0A0A' }}>
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              className="tab-btn"
+              onClick={() => onTabChange(tab.id)}
+              style={{
+                padding: '12px 24px',
+                color: activeTab === tab.id ? '#4A9EFF' : '#555555',
+                borderTop: 'none',
+                borderLeft: 'none',
+                borderRight: 'none',
+                borderBottom: activeTab === tab.id ? '2px solid #4A9EFF' : '2px solid transparent',
+                background: 'transparent',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: activeTab === tab.id ? 600 : 400,
+                outline: 'none',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    // ─── Scene List Sidebar ───────────────────────────────────
+    function SceneListSidebar({ scenes, selectedIdx, onSelect, sceneRefs }) {
+      const SCENE_COLORS = [
+        '#4A9EFF', '#00FF88', '#FFFFFF', '#FF4444', '#A78BFA',
+        '#F472B6', '#34D399', '#FBBF24', '#60A5FA', '#FB923C',
+      ];
+
+      return (
+        <div
+          style={{
+            width: 220,
+            minWidth: 220,
+            borderRight: '1px solid #2A2A2A',
+            overflowY: 'auto',
+            background: '#0A0A0A',
+          }}
+        >
+          {scenes.map((scene, idx) => {
+            const isSelected = selectedIdx === idx;
+            const color = SCENE_COLORS[idx % SCENE_COLORS.length];
+            return (
+              <div
+                key={scene.id + '-' + idx}
+                className={`scene-list-item border border-transparent px-3 py-2.5 ${isSelected ? 'selected' : ''}`}
+                onClick={() => {
+                  onSelect(idx);
+                  sceneRefs.current[idx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ background: color }}
+                  />
+                  <span
+                    className="text-sm font-medium"
+                    style={{ color: isSelected ? '#4A9EFF' : '#888888' }}
+                  >
+                    #{idx + 1}
+                  </span>
+                  <span className="text-xs text-txt-muted font-mono truncate" style={{ maxWidth: 120 }}>
+                    {scene.layoutType || scene.sceneType || '—'}
+                  </span>
+                </div>
+                <div className="text-xs text-txt-muted mt-0.5 pl-4 truncate leading-relaxed">
+                  {(scene.subtitles?.[0]?.text || '').slice(0, 28)}
+                  {(scene.subtitles?.[0]?.text?.length || 0) > 28 ? '…' : ''}
+                </div>
+                <div className="text-xs pl-4 mt-0.5" style={{ color: '#444' }}>
+                  {scene.subtitles?.length || 0}자막 · {formatDuration(scene.duration)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // ─── StructureTab ─────────────────────────────────────────
+    function StructureTab({ scenes, onSplit, onMoveUp, onMoveDown, onMerge, sceneRefs }) {
+      return (
+        <div className="flex flex-col gap-0 p-4 overflow-y-auto flex-1">
+          {scenes.map((scene, idx) => (
+            <React.Fragment key={scene.id + '-' + idx}>
+              <SceneStrip
+                scene={scene}
+                sceneIdx={idx}
+                scenesCount={scenes.length}
+                onSplit={onSplit}
+                onMoveUp={onMoveUp}
+                onMoveDown={onMoveDown}
+                sceneRef={el => sceneRefs.current[idx] = el}
+              />
+              {idx < scenes.length - 1 && (
+                <MergeBoundary
+                  sceneA={scene}
+                  sceneB={scenes[idx + 1]}
+                  idxA={idx}
+                  onMerge={onMerge}
+                />
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+      );
+    }
+
+    // ─── MeaningTab Constants ─────────────────────────────────
+    const NARRATIVE_ROLES = [
+      { value: 'opening',     label: '오프닝 (opening)' },
+      { value: 'problem',     label: '문제 제기 (problem)' },
+      { value: 'case',        label: '사례 (case)' },
+      { value: 'explanation', label: '설명 (explanation)' },
+      { value: 'comparison',  label: '비교 (comparison)' },
+      { value: 'reversal',    label: '반전 (reversal)' },
+      { value: 'deepening',   label: '심화 (deepening)' },
+      { value: 'conclusion',  label: '결론 (conclusion)' },
+      { value: 'body',        label: '본문 (body)' },
+    ];
+
+    const SCENE_TYPES = [
+      { value: 'title_card',        label: 'title_card',        desc: '타이틀 — 강렬한 한 문장 제목' },
+      { value: 'question_card',     label: 'question_card',     desc: '질문 — 궁금증 유발 카드' },
+      { value: 'warning_card',      label: 'warning_card',      desc: '경고 — 주의·위험 강조' },
+      { value: 'quote_focus',       label: 'quote_focus',       desc: '선언 — 핵심 메시지 인용' },
+      { value: 'icon_concept',      label: 'icon_concept',      desc: '개념 — 아이콘+텍스트 설명' },
+      { value: 'split_compare',     label: 'split_compare',     desc: '비교 — 좌우 대조 분리' },
+      { value: 'numbered_steps',    label: 'numbered_steps',    desc: '순차 — 번호 있는 단계' },
+      { value: 'grid_cards',        label: 'grid_cards',        desc: '그리드 — 카드 격자 배열' },
+      { value: 'example_pair',      label: 'example_pair',      desc: '예시 대비 — 좋은/나쁜 예' },
+      { value: 'metaphor_visual',   label: 'metaphor_visual',   desc: '비유 — 시각적 은유' },
+      { value: 'decision_tree',     label: 'decision_tree',     desc: '진단 — 분기 판단 흐름' },
+      { value: 'checklist',         label: 'checklist',         desc: '체크리스트 — 항목 확인' },
+      { value: 'framework_pillars', label: 'framework_pillars', desc: '프레임워크 — 기둥 구조' },
+      { value: 'summary_cards',     label: 'summary_cards',     desc: '요약 — 핵심 정리 카드' },
+      { value: 'cta_endcard',       label: 'cta_endcard',       desc: 'CTA — 행동 유도 마무리' },
+    ];
+
+    const MOTION_PRESETS = [
+      { value: 'fade_up',            label: 'fade_up',            desc: '아래→위 페이드 등장' },
+      { value: 'stagger_in',         label: 'stagger_in',         desc: '요소 순차 등장 (스태거)' },
+      { value: 'line_draw',          label: 'line_draw',          desc: '선 그리기 애니메이션' },
+      { value: 'ring_sweep',         label: 'ring_sweep',         desc: '원형 스위프 강조' },
+      { value: 'count_up',           label: 'count_up',           desc: '숫자 카운트업' },
+      { value: 'focus_glow',         label: 'focus_glow',         desc: '중심 발광 강조' },
+      { value: 'comparison_reveal',  label: 'comparison_reveal',  desc: '좌우 리빌 비교' },
+      { value: 'dim_reveal',         label: 'dim_reveal',         desc: '어둠→밝음 리빌' },
+    ];
+
+    const VISUAL_INTENT_TYPES   = ['text', 'icon', 'data', 'structure', 'image'];
+    const VISUAL_INTENT_LAYOUTS = ['center', 'left-right', 'top-bottom', 'grid', 'fullscreen'];
+
+    // ─── MeaningTab Field Components ─────────────────────────
+    const fieldStyle = {
+      label:       { color: '#888888', fontSize: 12, fontFamily: 'monospace', marginBottom: 4, display: 'block' },
+      input:       { background: '#141414', border: '1px solid #2A2A2A', borderRadius: 6, color: '#FFFFFF', fontSize: 13, padding: '6px 10px', width: '100%', outline: 'none', boxSizing: 'border-box' },
+      select:      { background: '#141414', border: '1px solid #2A2A2A', borderRadius: 6, color: '#FFFFFF', fontSize: 13, padding: '6px 10px', width: '100%', outline: 'none', boxSizing: 'border-box' },
+      inputFocus:  { border: '1px solid #4A9EFF' },
+      desc:        { color: '#555555', fontSize: 11, marginTop: 3 },
+      ok:          { color: '#00FF88', fontSize: 12, marginLeft: 6 },
+      ng:          { color: '#FF4444', fontSize: 12, marginLeft: 6 },
+      section:     { marginBottom: 20 },
+      row:         { display: 'flex', alignItems: 'center', gap: 6 },
+      tag:         { background: '#1E1E1E', border: '1px solid #2A2A2A', borderRadius: 4, color: '#AAAAAA', fontSize: 11, padding: '2px 8px', display: 'inline-flex', alignItems: 'center', gap: 4 },
+      tagRemove:   { color: '#555555', cursor: 'pointer', fontSize: 14, lineHeight: 1, background: 'none', border: 'none', padding: 0 },
+      addBtn:      { background: '#1E1E1E', border: '1px solid #2A2A2A', borderRadius: 4, color: '#888888', fontSize: 11, padding: '3px 8px', cursor: 'pointer' },
+      groupCard:   { background: '#141414', border: '1px solid #2A2A2A', borderRadius: 8, padding: '10px 12px', marginBottom: 8 },
+      groupHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+      badge:       { background: '#4A9EFF22', color: '#4A9EFF', fontSize: 11, padding: '2px 8px', borderRadius: 12, fontFamily: 'monospace' },
+    };
+
+    function FieldStatus({ ok, message }) {
+      return ok
+        ? <span style={fieldStyle.ok} title="유효">&#10003;</span>
+        : <span style={fieldStyle.ng} title={message || '유효하지 않음'}>&#10007;</span>;
+    }
+
+    function FocusInput({ value, onChange, style, placeholder, onFocus, onBlur }) {
+      const [focused, setFocused] = useState(false);
+      return (
+        <input
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          style={{ ...fieldStyle.input, ...(focused ? fieldStyle.inputFocus : {}), ...(style || {}) }}
+          onFocus={() => { setFocused(true); onFocus && onFocus(); }}
+          onBlur={() => { setFocused(false); onBlur && onBlur(); }}
+        />
+      );
+    }
+
+    function FocusSelect({ value, onChange, options, style }) {
+      const [focused, setFocused] = useState(false);
+      return (
+        <select
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          style={{ ...fieldStyle.select, ...(focused ? fieldStyle.inputFocus : {}), ...(style || {}) }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+        >
+          {options.map(opt => (
+            typeof opt === 'string'
+              ? <option key={opt} value={opt} style={{ background: '#1E1E1E', color: '#FFFFFF' }}>{opt}</option>
+              : <option key={opt.value} value={opt.value} style={{ background: '#1E1E1E', color: '#FFFFFF' }}>{opt.label}</option>
+          ))}
+        </select>
+      );
+    }
+
+    function TagInput({ tags, onChange }) {
+      const [inputVal, setInputVal] = useState('');
+
+      function addTag() {
+        const t = inputVal.trim();
+        if (t && !tags.includes(t)) {
+          onChange([...tags, t]);
+        }
+        setInputVal('');
+      }
+
+      function removeTag(idx) {
+        onChange(tags.filter((_, i) => i !== idx));
+      }
+
+      return (
+        <div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+            {tags.map((t, i) => (
+              <span key={i} style={fieldStyle.tag}>
+                {t}
+                <button style={fieldStyle.tagRemove} onClick={() => removeTag(i)}>&#215;</button>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <input
+              value={inputVal}
+              onChange={e => setInputVal(e.target.value)}
+              placeholder="요소 추가..."
+              style={{ ...fieldStyle.input, flex: 1 }}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
+            />
+            <button style={fieldStyle.addBtn} onClick={addTag}>+추가</button>
+          </div>
+        </div>
+      );
+    }
+
+    function CaptionGroupsEditor({ subtitles, groups, onChange }) {
+      const totalSubs = subtitles.length;
+
+      // 모든 자막이 정확히 하나의 그룹에 있는지 검증
+      const allIndices = (groups || []).flatMap(g => g.subtitle_indices || []);
+      const covered = new Set(allIndices);
+      const orphans = [];
+      for (let i = 0; i < totalSubs; i++) {
+        if (!covered.has(i)) orphans.push(i);
+      }
+      const duplicates = allIndices.filter((v, idx) => allIndices.indexOf(v) !== idx);
+      const isValid = orphans.length === 0 && duplicates.length === 0;
+
+      function updateGroup(gIdx, field, value) {
+        const next = groups.map((g, i) => i === gIdx ? { ...g, [field]: value } : g);
+        onChange(next);
+      }
+
+      function addGroup() {
+        onChange([...(groups || []), { subtitle_indices: [], emphasis: '', display_type: 'sequence' }]);
+      }
+
+      function removeGroup(gIdx) {
+        onChange(groups.filter((_, i) => i !== gIdx));
+      }
+
+      function autoGroup() {
+        // 연속 자막을 하나의 그룹으로
+        const auto = [{ subtitle_indices: Array.from({ length: totalSubs }, (_, i) => i), emphasis: '', display_type: 'sequence' }];
+        onChange(auto);
+      }
+
+      function toggleIndex(gIdx, subIdx) {
+        const g = groups[gIdx];
+        const indices = g.subtitle_indices || [];
+        const next = indices.includes(subIdx)
+          ? indices.filter(i => i !== subIdx)
+          : [...indices, subIdx].sort((a, b) => a - b);
+        updateGroup(gIdx, 'subtitle_indices', next);
+      }
+
+      return (
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: '#888888', fontSize: 11 }}>
+                {totalSubs}개 자막 · {(groups || []).length}개 그룹
+              </span>
+              <FieldStatus ok={isValid} message={
+                orphans.length > 0 ? `자막 ${orphans.join(', ')} 미할당` :
+                duplicates.length > 0 ? '중복 할당 있음' : ''
+              } />
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button style={fieldStyle.addBtn} onClick={autoGroup}>자동 그룹</button>
+              <button style={fieldStyle.addBtn} onClick={addGroup}>+ 그룹 추가</button>
+            </div>
+          </div>
+
+          {orphans.length > 0 && (
+            <div style={{ color: '#FFB04A', fontSize: 11, marginBottom: 8, padding: '6px 10px', background: '#FFB04A11', borderRadius: 4 }}>
+              &#9888; 미할당 자막: {orphans.map(i => `#${i}`).join(', ')}
+            </div>
+          )}
+          {duplicates.length > 0 && (
+            <div style={{ color: '#FF4444', fontSize: 11, marginBottom: 8, padding: '6px 10px', background: '#FF444411', borderRadius: 4 }}>
+              &#10007; 중복 할당: 자막 {[...new Set(duplicates)].map(i => `#${i}`).join(', ')}
+            </div>
+          )}
+
+          {(groups || []).map((g, gIdx) => (
+            <div key={gIdx} style={fieldStyle.groupCard}>
+              <div style={fieldStyle.groupHeader}>
+                <span style={fieldStyle.badge}>그룹 {gIdx + 1}</span>
+                <button
+                  style={{ ...fieldStyle.addBtn, color: '#FF4444', borderColor: '#FF444433' }}
+                  onClick={() => removeGroup(gIdx)}
+                >삭제</button>
+              </div>
+
+              {/* 자막 선택 */}
+              <div style={{ marginBottom: 8 }}>
+                <span style={{ ...fieldStyle.label, display: 'block', marginBottom: 4 }}>포함 자막</span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {subtitles.map((sub, subIdx) => {
+                    const selected = (g.subtitle_indices || []).includes(subIdx);
+                    const isDuplicate = duplicates.includes(subIdx) && selected;
+                    return (
+                      <button
+                        key={subIdx}
+                        onClick={() => toggleIndex(gIdx, subIdx)}
+                        style={{
+                          background: isDuplicate ? '#FF444433' : selected ? '#4A9EFF22' : '#1E1E1E',
+                          border: `1px solid ${isDuplicate ? '#FF4444' : selected ? '#4A9EFF' : '#2A2A2A'}`,
+                          borderRadius: 4,
+                          color: isDuplicate ? '#FF4444' : selected ? '#4A9EFF' : '#555555',
+                          fontSize: 11,
+                          padding: '2px 8px',
+                          cursor: 'pointer',
+                          maxWidth: 160,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                        title={sub.text}
+                      >
+                        #{subIdx} {sub.text.slice(0, 14)}{sub.text.length > 14 ? '…' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* emphasis */}
+              <div style={{ marginBottom: 6 }}>
+                <span style={fieldStyle.label}>강조 텍스트 (emphasis)</span>
+                <FocusInput
+                  value={g.emphasis || ''}
+                  onChange={v => updateGroup(gIdx, 'emphasis', v)}
+                  placeholder="강조할 핵심 구문..."
+                />
+              </div>
+
+              {/* display_type */}
+              <div>
+                <span style={fieldStyle.label}>표시 방식 (display_type)</span>
+                <FocusSelect
+                  value={g.display_type || 'sequence'}
+                  onChange={v => updateGroup(gIdx, 'display_type', v)}
+                  options={[
+                    { value: 'sequence',     label: 'sequence — 순차 등장' },
+                    { value: 'all_at_once',  label: 'all_at_once — 한번에 등장' },
+                  ]}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ─── MeaningTab ───────────────────────────────────────────
+    function MeaningTab({ scene, sceneIdx, updateScene, pushUndo }) {
+      if (!scene) {
+        return (
+          <div style={{ padding: 40, color: '#555555', flex: 1 }}>
+            씬을 선택하세요
+          </div>
+        );
+      }
+
+      const sa = scene.semantic_analysis || {};
+
+      // 로컬 폼 상태 — scene이 바뀌면 리셋
+      const [form, setForm] = useState(() => buildFormState(scene));
+
+      useEffect(() => {
+        setForm(buildFormState(scene));
+      }, [scene.id]);
+
+      function buildFormState(sc) {
+        const s = sc.semantic_analysis || {};
+        return {
+          narrative_role:  s.narrative_role  || '',
+          scene_type:      s.scene_type      || '',
+          headline:        s.headline        || '',
+          subheadline:     s.subheadline     || '',
+          visual_intent: {
+            type:     (s.visual_intent && s.visual_intent.type)     || 'text',
+            layout:   (s.visual_intent && s.visual_intent.layout)   || 'center',
+            elements: (s.visual_intent && s.visual_intent.elements) || [],
+          },
+          motion_preset:   s.motion_preset   || sc.motionPreset || '',
+          caption_groups:  s.caption_groups  || [],
+        };
+      }
+
+      // 유효성
+      const headlineLen = form.headline.length;
+      const subheadlineLen = form.subheadline.length;
+      const validation = {
+        narrative_role: NARRATIVE_ROLES.some(r => r.value === form.narrative_role),
+        scene_type:     SCENE_TYPES.some(t => t.value === form.scene_type),
+        headline:       headlineLen >= 3 && headlineLen <= 20,
+        subheadline:    subheadlineLen === 0 || (subheadlineLen >= 10 && subheadlineLen <= 40),
+        motion_preset:  MOTION_PRESETS.some(m => m.value === form.motion_preset),
+        caption_groups: (() => {
+          const total = scene.subtitles?.length || 0;
+          const all = (form.caption_groups || []).flatMap(g => g.subtitle_indices || []);
+          const covered = new Set(all);
+          return all.length === covered.size && covered.size === total;
+        })(),
+      };
+
+      function updateField(field, value) {
+        setForm(prev => ({ ...prev, [field]: value }));
+      }
+
+      function updateVisualIntent(field, value) {
+        setForm(prev => ({ ...prev, visual_intent: { ...prev.visual_intent, [field]: value } }));
+      }
+
+      function applyChanges() {
+        pushUndo && pushUndo();
+        const updated = {
+          ...scene,
+          semantic_analysis: {
+            ...(scene.semantic_analysis || {}),
+            ...form,
+          },
+          // 동기화
+          layoutType:   form.scene_type  || scene.layoutType,
+          sceneType:    form.scene_type  || scene.sceneType,
+          motionPreset: form.motion_preset || scene.motionPreset,
+        };
+        updateScene(sceneIdx, updated);
+      }
+
+      const currentSceneTypeMeta = SCENE_TYPES.find(t => t.value === form.scene_type);
+      const currentMotionPresetMeta = MOTION_PRESETS.find(m => m.value === form.motion_preset);
+      const hasSa = !!scene.semantic_analysis;
+
+      const sectionTitleStyle = {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: 600,
+        marginBottom: 12,
+        paddingBottom: 6,
+        borderBottom: '1px solid #1E1E1E',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+      };
+
+      return (
+        <div style={{ padding: '24px 28px', flex: 1, overflowY: 'auto', maxWidth: 720 }}>
+
+          {/* 헤더 */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+            <div>
+              <span style={{ color: '#888888', fontSize: 12, fontFamily: 'monospace' }}>의미 분석</span>
+              <span style={{ color: '#555555', fontSize: 12, marginLeft: 8 }}>{scene.id}</span>
+            </div>
+            {!hasSa && (
+              <div style={{ color: '#FFB04A', fontSize: 11, padding: '4px 10px', background: '#FFB04A11', borderRadius: 4 }}>
+                &#9888; /scene-plan을 먼저 실행하세요
+              </div>
+            )}
+          </div>
+
+          {/* ── 1. narrative_role ── */}
+          <div style={fieldStyle.section}>
+            <div style={sectionTitleStyle}>
+              <span>서사 역할</span>
+              <FieldStatus ok={validation.narrative_role} />
+            </div>
+            <label style={fieldStyle.label}>narrative_role</label>
+            <FocusSelect
+              value={form.narrative_role}
+              onChange={v => updateField('narrative_role', v)}
+              options={[{ value: '', label: '— 선택 —' }, ...NARRATIVE_ROLES]}
+            />
+          </div>
+
+          {/* ── 2. scene_type ── */}
+          <div style={fieldStyle.section}>
+            <div style={sectionTitleStyle}>
+              <span>씬 타입</span>
+              <FieldStatus ok={validation.scene_type} />
+            </div>
+            <label style={fieldStyle.label}>scene_type (15종)</label>
+            <FocusSelect
+              value={form.scene_type}
+              onChange={v => updateField('scene_type', v)}
+              options={[{ value: '', label: '— 선택 —' }, ...SCENE_TYPES]}
+            />
+            {currentSceneTypeMeta && (
+              <div style={fieldStyle.desc}>{currentSceneTypeMeta.desc}</div>
+            )}
+          </div>
+
+          {/* ── 3. headline ── */}
+          <div style={fieldStyle.section}>
+            <div style={sectionTitleStyle}>
+              <span>헤드라인</span>
+              <FieldStatus ok={validation.headline} message="3~20자 필수" />
+            </div>
+            <label style={fieldStyle.label}>headline (3~20자)</label>
+            <div style={fieldStyle.row}>
+              <FocusInput
+                value={form.headline}
+                onChange={v => updateField('headline', v)}
+                placeholder="핵심 메시지 (3~20자)..."
+              />
+              <span style={{
+                fontSize: 11,
+                fontFamily: 'monospace',
+                color: headlineLen < 3 || headlineLen > 20 ? '#FF4444' : '#00FF88',
+                minWidth: 32,
+                textAlign: 'right',
+              }}>
+                {headlineLen}자
+              </span>
+            </div>
+          </div>
+
+          {/* ── 4. subheadline ── */}
+          <div style={fieldStyle.section}>
+            <div style={sectionTitleStyle}>
+              <span>서브헤드라인</span>
+              <FieldStatus ok={validation.subheadline} message="비워두거나 10~40자" />
+            </div>
+            <label style={fieldStyle.label}>subheadline (선택, 10~40자)</label>
+            <div style={fieldStyle.row}>
+              <FocusInput
+                value={form.subheadline}
+                onChange={v => updateField('subheadline', v)}
+                placeholder="부제목 또는 설명 (선택)..."
+              />
+              <span style={{
+                fontSize: 11,
+                fontFamily: 'monospace',
+                color: subheadlineLen === 0 ? '#555555' : (subheadlineLen < 10 || subheadlineLen > 40 ? '#FF4444' : '#00FF88'),
+                minWidth: 32,
+                textAlign: 'right',
+              }}>
+                {subheadlineLen === 0 ? '—' : subheadlineLen + '자'}
+              </span>
+            </div>
+          </div>
+
+          {/* ── 5. visual_intent ── */}
+          <div style={fieldStyle.section}>
+            <div style={sectionTitleStyle}>
+              <span>비주얼 의도</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 10 }}>
+              <div>
+                <label style={fieldStyle.label}>type (비주얼 유형)</label>
+                <FocusSelect
+                  value={form.visual_intent.type}
+                  onChange={v => updateVisualIntent('type', v)}
+                  options={VISUAL_INTENT_TYPES}
+                />
+              </div>
+              <div>
+                <label style={fieldStyle.label}>layout (배치)</label>
+                <FocusSelect
+                  value={form.visual_intent.layout}
+                  onChange={v => updateVisualIntent('layout', v)}
+                  options={VISUAL_INTENT_LAYOUTS}
+                />
+              </div>
+            </div>
+            <label style={fieldStyle.label}>elements (구성 요소 태그)</label>
+            <TagInput
+              tags={form.visual_intent.elements}
+              onChange={v => updateVisualIntent('elements', v)}
+            />
+          </div>
+
+          {/* ── 6. motion_preset ── */}
+          <div style={fieldStyle.section}>
+            <div style={sectionTitleStyle}>
+              <span>모션 프리셋</span>
+              <FieldStatus ok={validation.motion_preset} />
+            </div>
+            <label style={fieldStyle.label}>motion_preset (8종)</label>
+            <FocusSelect
+              value={form.motion_preset}
+              onChange={v => updateField('motion_preset', v)}
+              options={[{ value: '', label: '— 선택 —' }, ...MOTION_PRESETS]}
+            />
+            {currentMotionPresetMeta && (
+              <div style={fieldStyle.desc}>{currentMotionPresetMeta.desc}</div>
+            )}
+          </div>
+
+          {/* ── 7. caption_groups ── */}
+          <div style={fieldStyle.section}>
+            <div style={sectionTitleStyle}>
+              <span>자막 그룹</span>
+              <FieldStatus ok={validation.caption_groups} message="모든 자막이 정확히 1개 그룹에 속해야 함" />
+            </div>
+            <CaptionGroupsEditor
+              subtitles={scene.subtitles || []}
+              groups={form.caption_groups}
+              onChange={v => updateField('caption_groups', v)}
+            />
+          </div>
+
+          {/* ── 적용 버튼 ── */}
+          <div style={{ marginTop: 8, paddingTop: 16, borderTop: '1px solid #1E1E1E', display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              onClick={applyChanges}
+              style={{
+                background: '#4A9EFF',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                padding: '8px 20px',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => { e.target.style.background = '#3A8EEF'; }}
+              onMouseLeave={e => { e.target.style.background = '#4A9EFF'; }}
+            >
+              씬에 적용
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── STACK_TEMPLATE_META ──────────────────────────────────
+    const STACK_TEMPLATE_META = {
+      introduceCenter:   { label: '중앙 인트로',  desc: 'Icon + Kicker + Headline 중앙 배치', nodes: 'Icon, Kicker, Headline, BodyText',                       use: '첫 장면, 주제 소개' },
+      explainDefinition: { label: '정의 설명',   desc: 'Headline + 좌우 Split (BulletList | Icon+Badge)',         nodes: 'Headline, Divider, Split, BulletList, Icon, Badge',     use: '용어 설명, 개념 정의' },
+      explainDramatic:   { label: '강조 설명',   desc: 'RingChart/Icon + Headline 중앙 집중',                    nodes: 'Kicker, RingChart/Icon, Headline, BodyText',             use: '통계, 수치 강조' },
+      compareExample:    { label: '비교 예시',   desc: 'Headline + 좌우 IconCard 비교',                          nodes: 'Headline, Split, IconCard×2',                           use: 'A vs B, 전/후 비교' },
+      listDefinition:    { label: '순서 정의',   desc: 'Headline + ProcessStepCard → Arrow 흐름',                nodes: 'Kicker, Headline, ProcessStepCard×N, ArrowConnector',   use: '단계 설명, 프로세스' },
+      listExample:       { label: '목록 예시',   desc: 'Headline + Grid에 IconCard 나열',                        nodes: 'Kicker, Headline, Grid, IconCard×N',                    use: '항목 나열, 특징 소개' },
+      emphasizeQuote:    { label: '인용 강조',   desc: 'Icon(quote) + 대형 Headline + CompareCard',              nodes: 'Icon, Headline, Divider, CompareCard',                  use: '핵심 메시지, 인용' },
+      emphasizeGlow:     { label: '글로우 강조', desc: 'Overlay 배경 + Icon + Headline',                         nodes: 'Overlay, AccentGlow, Icon, Headline, BodyText',          use: '임팩트 장면, 선언' },
+    };
+
+    const STACK_TEMPLATE_ORDER = [
+      'introduceCenter', 'explainDefinition', 'explainDramatic', 'compareExample',
+      'listDefinition', 'listExample', 'emphasizeQuote', 'emphasizeGlow',
+    ];
+
+    const MOTION_META_PREVIEW = {
+      fade_up:           { label: '페이드 업',    desc: '아래→위 부드러운 등장 (18프레임)' },
+      stagger_in:        { label: '순차 등장',    desc: '아이템별 시차 등장 (6프레임 간격)' },
+      line_draw:         { label: '선 그리기',    desc: '좌→우 선 그리기 (20프레임)' },
+      ring_sweep:        { label: '원형 스위프',  desc: '원형 강조 효과' },
+      count_up:          { label: '카운트업',     desc: '0에서 목표 숫자까지 카운팅' },
+      focus_glow:        { label: '포커스 글로우', desc: '발광 강조 효과' },
+      comparison_reveal: { label: '비교 리빌',    desc: '좌우 순차 등장' },
+      dim_reveal:        { label: '딤 리빌',      desc: '배경 어두워지며 콘텐츠 등장' },
+    };
+
+    // ─── Wireframe ────────────────────────────────────────────
+    function WireframePreview({ type, headline }) {
+      const hl = headline ? headline.slice(0, 30) : null;
+
+      function PH({ w = '60%', h = 7, color = '#2E2E2E', style }) {
+        return <div style={{ width: w, height: h, background: color, borderRadius: 3, flexShrink: 0, ...style }} />;
+      }
+
+      function HLText({ size = 13, color = '#FFFFFF', align = 'center', style }) {
+        if (hl) {
+          return (
+            <div style={{ color, fontSize: size, fontWeight: 700, lineHeight: 1.3,
+              textAlign: align, wordBreak: 'keep-all', maxWidth: '90%', ...style }}>
+              {hl}
+            </div>
+          );
+        }
+        return <PH w="70%" h={size + 1} color="#3A3A3A" style={{ alignSelf: align === 'center' ? 'center' : undefined, ...style }} />;
+      }
+
+      const boxStyle = {
+        width: 384, height: 216,
+        background: '#141414',
+        border: '1px solid #2A2A2A',
+        borderRadius: 6,
+        overflow: 'hidden',
+        position: 'relative',
+        flexShrink: 0,
+      };
+
+      const CENTER_COL = {
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        height: '100%', gap: 10, padding: '0 28px',
+      };
+
+      // 1. introduceCenter — circle icon + kicker + headline + body
+      if (type === 'introduceCenter') return (
+        <div style={boxStyle}>
+          <div style={CENTER_COL}>
+            <div style={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid #4A9EFF',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#4A9EFF', opacity: 0.7 }} />
+            </div>
+            <PH w="32%" h={5} color="#2A3A4A" />
+            <HLText size={15} />
+            <PH w="58%" h={5} color="#222" />
+          </div>
+        </div>
+      );
+
+      // 2. explainDefinition — headline top + divider + split: bullets | icon+badge
+      if (type === 'explainDefinition') return (
+        <div style={boxStyle}>
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '14px 0 0 0' }}>
+            <div style={{ paddingLeft: 20, paddingRight: 20, marginBottom: 8 }}>
+              <HLText size={12} align="left" />
+            </div>
+            <div style={{ height: 1, background: '#2A2A2A', marginBottom: 10, flexShrink: 0 }} />
+            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+              {/* left: bullet list */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                gap: 8, padding: '0 16px', borderRight: '1px solid #222' }}>
+                {[0, 1, 2].map(i => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#4A9EFF', flexShrink: 0 }} />
+                    <PH w={`${72 - i * 10}%`} h={5} color="#252525" />
+                  </div>
+                ))}
+              </div>
+              {/* right: large icon + badge */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                justifyContent: 'center', gap: 7, padding: '0 14px' }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, background: '#1E1E1E',
+                  border: '1.5px solid #2A2A2A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{ width: 22, height: 22, borderRadius: 6, background: '#2E2E2E' }} />
+                </div>
+                <div style={{ background: 'rgba(74,158,255,0.15)', border: '1px solid rgba(74,158,255,0.35)',
+                  borderRadius: 12, padding: '3px 10px', fontSize: 9, color: '#4A9EFF', fontWeight: 700 }}>
+                  BADGE
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+
+      // 3. explainDramatic — kicker + donut ring + headline + body
+      if (type === 'explainDramatic') return (
+        <div style={boxStyle}>
+          <div style={CENTER_COL}>
+            <PH w="28%" h={5} color="#2A2A2A" />
+            {/* SVG donut ring */}
+            <svg width="60" height="60" viewBox="0 0 60 60">
+              <circle cx="30" cy="30" r="24" fill="none" stroke="#2A2A2A" strokeWidth="6" />
+              <circle cx="30" cy="30" r="24" fill="none" stroke="#4A9EFF" strokeWidth="6"
+                strokeDasharray="113" strokeDashoffset="30"
+                strokeLinecap="round"
+                style={{ transformOrigin: '30px 30px', transform: 'rotate(-90deg)' }} />
+            </svg>
+            <HLText size={14} />
+            <PH w="55%" h={5} color="#222" />
+          </div>
+        </div>
+      );
+
+      // 4. compareExample — headline top + two side-by-side icon cards
+      if (type === 'compareExample') return (
+        <div style={boxStyle}>
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '14px 16px', boxSizing: 'border-box', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <HLText size={12} />
+            </div>
+            <div style={{ display: 'flex', flex: 1, gap: 10 }}>
+              {[
+                { accent: '#4A9EFF', label: 'A' },
+                { accent: '#00FF88', label: 'B' },
+              ].map(card => (
+                <div key={card.label} style={{ flex: 1, background: '#1C1C1C',
+                  border: `1px solid ${card.accent}33`, borderRadius: 6,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  justifyContent: 'center', gap: 7, padding: '8px 6px' }}>
+                  <div style={{ width: 28, height: 28, borderRadius: '50%',
+                    border: `2px solid ${card.accent}`, opacity: 0.8 }} />
+                  <div style={{ fontSize: 9, color: card.accent, fontWeight: 700, letterSpacing: 1 }}>{card.label}</div>
+                  <PH w="78%" h={4} color="#2A2A2A" />
+                  <PH w="60%" h={4} color="#222" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+
+      // 5. listDefinition — kicker + headline + 3 process step cards with arrows
+      if (type === 'listDefinition') return (
+        <div style={boxStyle}>
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%',
+            padding: '14px 20px', boxSizing: 'border-box', gap: 8 }}>
+            <PH w="24%" h={5} color="#2A3040" />
+            <HLText size={12} align="left" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, marginTop: 2 }}>
+              {[1, 2, 3].map((n, i) => (
+                <React.Fragment key={n}>
+                  <div style={{ flex: 1, background: '#1C1C1C', border: '1px solid #2A2A2A',
+                    borderRadius: 5, display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center', gap: 5, padding: '8px 4px',
+                    alignSelf: 'stretch' }}>
+                    <div style={{ width: 18, height: 18, borderRadius: '50%',
+                      background: '#00FF8822', border: '1.5px solid #00FF8866',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ fontSize: 8, color: '#00FF88', fontWeight: 700 }}>{n}</span>
+                    </div>
+                    <PH w="80%" h={4} color="#2A2A2A" />
+                    <PH w="60%" h={3} color="#222" />
+                  </div>
+                  {i < 2 && (
+                    <div style={{ fontSize: 10, color: '#444', flexShrink: 0 }}>&#8594;</div>
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+
+      // 6. listExample — kicker + headline + 2x2 icon card grid
+      if (type === 'listExample') return (
+        <div style={boxStyle}>
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%',
+            padding: '12px 16px', boxSizing: 'border-box', gap: 8 }}>
+            <PH w="26%" h={5} color="#2A3040" />
+            <HLText size={12} align="left" />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, flex: 1 }}>
+              {[0, 1, 2, 3].map(i => (
+                <div key={i} style={{ background: '#1C1C1C', border: '1px solid #2A2A2A', borderRadius: 5,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  justifyContent: 'center', gap: 4, padding: '6px 8px' }}>
+                  <div style={{ width: 20, height: 20, borderRadius: 5,
+                    background: i === 0 ? 'rgba(0,255,136,0.15)' : '#252525',
+                    border: `1px solid ${i === 0 ? 'rgba(0,255,136,0.4)' : '#333'}` }} />
+                  <PH w="80%" h={4} color="#333" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+
+      // 7. emphasizeQuote — large quote + big headline + divider + bad/good compare
+      if (type === 'emphasizeQuote') return (
+        <div style={boxStyle}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', height: '100%', padding: '12px 24px', boxSizing: 'border-box', gap: 8 }}>
+            <div style={{ fontSize: 32, color: '#888', lineHeight: 1, alignSelf: 'flex-start', marginBottom: -4 }}>"</div>
+            <HLText size={14} />
+            <div style={{ height: 1, background: '#2A2A2A', width: '100%', flexShrink: 0 }} />
+            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+              <div style={{ flex: 1, background: 'rgba(255,68,68,0.07)',
+                border: '1px solid rgba(255,68,68,0.25)', borderRadius: 5,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '6px 0' }}>
+                <span style={{ fontSize: 12, color: '#FF4444' }}>&#10007;</span>
+                <PH w="52%" h={4} color="#2A1515" />
+              </div>
+              <div style={{ flex: 1, background: 'rgba(0,255,136,0.06)',
+                border: '1px solid rgba(0,255,136,0.25)', borderRadius: 5,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '6px 0' }}>
+                <span style={{ fontSize: 12, color: '#00FF88' }}>&#10003;</span>
+                <PH w="52%" h={4} color="#122015" />
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+
+      // 8. emphasizeGlow — radial glow bg + icon + large headline
+      if (type === 'emphasizeGlow') return (
+        <div style={{ ...boxStyle, background: '#0D0D0D' }}>
+          {/* radial glow */}
+          <div style={{ position: 'absolute', inset: 0,
+            background: 'radial-gradient(ellipse 60% 55% at 50% 45%, rgba(74,158,255,0.18) 0%, transparent 70%)',
+            pointerEvents: 'none' }} />
+          <div style={{ ...CENTER_COL, position: 'relative' }}>
+            <div style={{ width: 36, height: 36, borderRadius: '50%',
+              background: 'rgba(74,158,255,0.15)', border: '1.5px solid rgba(74,158,255,0.45)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: 16, height: 16, borderRadius: '50%',
+                background: 'rgba(74,158,255,0.6)' }} />
+            </div>
+            <HLText size={16} color="#FFFFFF" />
+            <PH w="50%" h={5} color="#1A2030" />
+          </div>
+        </div>
+      );
+
+      // fallback
+      return (
+        <div style={boxStyle}>
+          <div style={CENTER_COL}>
+            <PH w="72%" h={11} color="#2E2E2E" />
+            <PH w="55%" h={6} color="#252525" />
+          </div>
+        </div>
+      );
+    }
+
+    // ─── PreviewTab ───────────────────────────────────────────
+    function PreviewTab({ scene, onUpdateScene, onPushUndo }) {
+      const getTemplateKey = (sc) => {
+        if (!sc) return STACK_TEMPLATE_ORDER[0];
+        const key = sc.layoutType || sc._original?.layout_family || sc.sceneType || sc.semantic_analysis?.scene_type || '';
+        return STACK_TEMPLATE_ORDER.includes(key) ? key : STACK_TEMPLATE_ORDER[0];
+      };
+
+      const currentKey = getTemplateKey(scene);
+      const currentKeyIdx = STACK_TEMPLATE_ORDER.indexOf(currentKey);
+
+      const [browseIdx, setBrowseIdx] = useState(() => Math.max(0, currentKeyIdx));
+      const [applying, setApplying] = useState(false);
+      const [recommended, setRecommended] = useState(null);
+      const [recommendLoading, setRecommendLoading] = useState(false);
+
+      // 씬이 바뀌면 해당 씬의 템플릿으로 초기화
+      const prevSceneId = useRef(scene?.id);
+      useEffect(() => {
+        if (scene?.id !== prevSceneId.current) {
+          prevSceneId.current = scene?.id;
+          const idx = STACK_TEMPLATE_ORDER.indexOf(getTemplateKey(scene));
+          setBrowseIdx(Math.max(0, idx));
+          setRecommended(null);
+        }
+      });
+
+      if (!scene) {
+        return (
+          <div style={{ padding: 40, color: '#555555', flex: 1 }}>
+            씬을 선택하세요
+          </div>
+        );
+      }
+
+      const browseKey = STACK_TEMPLATE_ORDER[browseIdx];
+      const meta = STACK_TEMPLATE_META[browseKey] || {};
+      const motionPreset = scene.semantic_analysis?.motion_preset || scene.motionPreset || '';
+      const motionMeta = MOTION_META_PREVIEW[motionPreset] || null;
+      const headline = scene.semantic_analysis?.headline || scene.headline || scene.title || '';
+      const isCurrentKey = browseKey === currentKey;
+      const isRecommended = recommended && recommended === browseKey;
+
+      function handlePrev() {
+        setBrowseIdx(i => (i - 1 + STACK_TEMPLATE_ORDER.length) % STACK_TEMPLATE_ORDER.length);
+      }
+
+      function handleNext() {
+        setBrowseIdx(i => (i + 1) % STACK_TEMPLATE_ORDER.length);
+      }
+
+      function handleApplyStack() {
+        if (!onUpdateScene || applying) return;
+        setApplying(true);
+        onPushUndo && onPushUndo();
+
+        const input = {
+          intent: scene._original?.chunk_metadata?.intent || 'introduce',
+          evidence_type: scene._original?.chunk_metadata?.evidence_type || 'none',
+          tone: scene._original?.chunk_metadata?.tone || 'neutral',
+          density: scene._original?.chunk_metadata?.density || 2,
+          copy_layers: scene._original?.copy_layers || {
+            kicker: null,
+            headline: scene.title || '',
+            supporting: null,
+            footer_caption: null,
+          },
+          emphasis_tokens: scene.keywords || [],
+          svg_icons: scene._original?.assets?.svg_icons || [],
+          chart_data: scene._original?.assets?.chart_data || null,
+        };
+
+        fetch(API_BASE + '/api/scenes/stack', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ templateKey: browseKey, input }),
+        })
+          .then(r => {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(response => {
+            onUpdateScene({
+              ...scene,
+              layoutType: browseKey,
+              _original: {
+                ...scene._original,
+                stack_root: response.stack_root,
+                layout_family: browseKey,
+              },
+            });
+            // toast shown by parent if wired; otherwise show inline
+            setApplying(false);
+          })
+          .catch(err => {
+            console.error('stack apply failed:', err);
+            setApplying(false);
+          });
+      }
+
+      function handleAutoRecommend() {
+        if (recommendLoading) return;
+        setRecommendLoading(true);
+        fetch(API_BASE + '/api/scenes/stack')
+          .then(r => r.json())
+          .then(data => {
+            // API returns list of templates; pick the one matching scene intent
+            const intent = scene._original?.chunk_metadata?.intent || 'introduce';
+            const intentMap = {
+              introduce: 'introduceCenter',
+              define: 'explainDefinition',
+              statistic: 'explainDramatic',
+              compare: 'compareExample',
+              process: 'listDefinition',
+              list: 'listExample',
+              quote: 'emphasizeQuote',
+              impact: 'emphasizeGlow',
+            };
+            const rec = intentMap[intent] || 'introduceCenter';
+            setRecommended(rec);
+            // navigate to recommended
+            const idx = STACK_TEMPLATE_ORDER.indexOf(rec);
+            if (idx >= 0) setBrowseIdx(idx);
+            setRecommendLoading(false);
+          })
+          .catch(() => {
+            // fallback: just use intent mapping without API
+            const intent = scene._original?.chunk_metadata?.intent || 'introduce';
+            const intentMap = {
+              introduce: 'introduceCenter',
+              define: 'explainDefinition',
+              statistic: 'explainDramatic',
+              compare: 'compareExample',
+              process: 'listDefinition',
+              list: 'listExample',
+              quote: 'emphasizeQuote',
+              impact: 'emphasizeGlow',
+            };
+            const rec = intentMap[intent] || 'introduceCenter';
+            setRecommended(rec);
+            const idx = STACK_TEMPLATE_ORDER.indexOf(rec);
+            if (idx >= 0) setBrowseIdx(idx);
+            setRecommendLoading(false);
+          });
+      }
+
+      return (
+        <div style={{ padding: '24px 28px', flex: 1, overflowY: 'auto', maxWidth: 640 }}>
+
+          {/* 헤더 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+            <span style={{ color: '#888888', fontSize: 13, fontWeight: 600 }}>스택 템플릿</span>
+            <span style={{ color: '#333333', fontSize: 12 }}>|</span>
+            <span style={{ color: '#4A9EFF', fontSize: 12, fontFamily: 'monospace' }}>현재: {currentKey}</span>
+            <button
+              onClick={handleAutoRecommend}
+              disabled={recommendLoading}
+              style={{ marginLeft: 'auto', background: 'transparent',
+                border: '1px solid #2A2A2A', borderRadius: 5,
+                color: recommendLoading ? '#444' : '#888888',
+                fontSize: 11, padding: '3px 10px', cursor: recommendLoading ? 'default' : 'pointer' }}
+              title="씬 의도에 맞는 템플릿 자동 추천"
+            >
+              {recommendLoading ? '분석 중...' : '자동 추천'}
+            </button>
+          </div>
+
+          {/* 추천 배너 */}
+          {recommended && (
+            <div style={{ background: 'rgba(0,255,136,0.06)', border: '1px solid rgba(0,255,136,0.2)',
+              borderRadius: 6, padding: '8px 12px', marginBottom: 14,
+              display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 10, color: '#00FF88' }}>&#9670;</span>
+              <span style={{ color: '#888888', fontSize: 11 }}>
+                intent <span style={{ color: '#4A9EFF', fontFamily: 'monospace' }}>
+                  {scene._original?.chunk_metadata?.intent || 'introduce'}
+                </span> 기준 추천:
+              </span>
+              <span style={{ color: '#00FF88', fontSize: 11, fontWeight: 700 }}>
+                {STACK_TEMPLATE_META[recommended]?.label}
+              </span>
+              <span style={{ color: '#444', fontSize: 11, fontFamily: 'monospace' }}>{recommended}</span>
+            </div>
+          )}
+
+          {/* 탐색 컨트롤 + 와이어프레임 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+
+            {/* 이전 버튼 */}
+            <button
+              onClick={handlePrev}
+              style={{ width: 34, height: 34, borderRadius: '50%', background: '#1E1E1E',
+                border: '1px solid #2A2A2A', color: '#888888', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 16, flexShrink: 0 }}
+              title="이전 템플릿"
+            >&#8592;</button>
+
+            {/* 중앙 — 라벨 + 와이어프레임 + 페이지네이션 */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+              {/* 템플릿 라벨 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+                <span style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 700 }}>{meta.label}</span>
+                <span style={{ color: '#444444', fontSize: 11, fontFamily: 'monospace' }}>{browseKey}</span>
+                {isCurrentKey && (
+                  <span style={{ background: 'rgba(0,255,136,0.12)', border: '1px solid rgba(0,255,136,0.3)',
+                    color: '#00FF88', fontSize: 10, padding: '1px 8px', borderRadius: 10 }}>현재</span>
+                )}
+                {isRecommended && !isCurrentKey && (
+                  <span style={{ background: 'rgba(0,255,136,0.08)', border: '1px solid rgba(0,255,136,0.2)',
+                    color: '#00FF88', fontSize: 10, padding: '1px 8px', borderRadius: 10 }}>추천</span>
+                )}
+              </div>
+
+              {/* 와이어프레임 */}
+              <WireframePreview type={browseKey} headline={isCurrentKey ? headline : null} />
+
+              {/* 페이지네이션 점 */}
+              <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                {STACK_TEMPLATE_ORDER.map((t, i) => (
+                  <div
+                    key={t}
+                    onClick={() => setBrowseIdx(i)}
+                    title={STACK_TEMPLATE_META[t]?.label || t}
+                    style={{
+                      width: i === browseIdx ? 18 : 5,
+                      height: 5,
+                      borderRadius: 3,
+                      background: i === browseIdx ? '#4A9EFF'
+                        : (t === currentKey ? '#00FF88'
+                        : (t === recommended ? 'rgba(0,255,136,0.4)' : '#2A2A2A')),
+                      cursor: 'pointer',
+                      transition: 'width 0.15s, background 0.15s',
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* 다음 버튼 */}
+            <button
+              onClick={handleNext}
+              style={{ width: 34, height: 34, borderRadius: '50%', background: '#1E1E1E',
+                border: '1px solid #2A2A2A', color: '#888888', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 16, flexShrink: 0 }}
+              title="다음 템플릿"
+            >&#8594;</button>
+          </div>
+
+          {/* 생성 / 적용 버튼 */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 16 }}>
+            <button
+              onClick={handleApplyStack}
+              disabled={applying}
+              style={{
+                background: applying ? '#333' : '#4A9EFF',
+                color: applying ? '#666' : '#FFFFFF',
+                border: 'none', borderRadius: 6,
+                padding: '8px 22px', fontSize: 12, fontWeight: 600,
+                cursor: applying ? 'default' : 'pointer',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={e => { if (!applying) e.currentTarget.style.background = '#3A8EEF'; }}
+              onMouseLeave={e => { if (!applying) e.currentTarget.style.background = '#4A9EFF'; }}
+            >
+              {applying ? '생성 중...' : `이 스택으로 적용 (${meta.label})`}
+            </button>
+          </div>
+
+          {/* 메타 정보 패널 */}
+          <div style={{ background: '#141414', border: '1px solid #2A2A2A', borderRadius: 8,
+            padding: '14px 16px', marginBottom: 14 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {[
+                ['설명',    meta.desc],
+                ['노드',    meta.nodes],
+                ['용도',    meta.use],
+              ].map(([k, v]) => v && (
+                <div key={k} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                  <span style={{ color: '#555555', fontSize: 11, fontFamily: 'monospace',
+                    minWidth: 40, flexShrink: 0 }}>{k}</span>
+                  <span style={{ color: '#888888', fontSize: 12, lineHeight: 1.5 }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 모션 프리셋 패널 */}
+          {motionMeta && (
+            <div style={{ background: '#141414', border: '1px solid #2A2A2A', borderRadius: 8,
+              padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <div style={{ width: 30, height: 30, borderRadius: '50%',
+                background: 'rgba(0,255,136,0.1)', border: '1px solid rgba(0,255,136,0.25)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: 11, color: '#00FF88' }}>&#9654;</span>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ color: '#FFFFFF', fontSize: 12, fontWeight: 600, marginBottom: 2 }}>
+                  {motionMeta.label}
+                </div>
+                <div style={{ color: '#555555', fontSize: 11 }}>{motionMeta.desc}</div>
+              </div>
+              <div style={{ color: '#444444', fontSize: 11, fontFamily: 'monospace', flexShrink: 0 }}>
+                {motionPreset}
+              </div>
+            </div>
+          )}
+
+          {/* 씬 원시 정보 */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 20 }}>
+            {[
+              ['layoutType',    scene.layoutType],
+              ['layout_family', scene._original?.layout_family],
+              ['intent',        scene._original?.chunk_metadata?.intent],
+              ['motion',        motionPreset || undefined],
+            ].map(([k, v]) => v && (
+              <div key={k} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span style={{ color: '#333333', fontSize: 11, fontFamily: 'monospace', minWidth: 100 }}>{k}</span>
+                <span style={{ color: '#555555', fontSize: 12 }}>{v}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* ─── AI 레이아웃 섹션 ─── */}
+          <AILayoutSection scene={scene} onUpdateScene={onUpdateScene} onPushUndo={onPushUndo} />
+        </div>
+      );
+    }
+
+    // ─── AI Layout Section ─────────────────────────────────────
+    function AILayoutSection({ scene, onUpdateScene, onPushUndo }) {
+      const [jsonText, setJsonText] = useState('');
+      const [applyError, setApplyError] = useState(null);
+      const [applySuccess, setApplySuccess] = useState(false);
+
+      function handleApplyJson() {
+        setApplyError(null);
+        setApplySuccess(false);
+        let parsed;
+        try {
+          parsed = JSON.parse(jsonText);
+        } catch (e) {
+          setApplyError('JSON 파싱 실패: ' + e.message);
+          return;
+        }
+        // Basic validation
+        if (!parsed.type || parsed.type !== 'SceneRoot') {
+          setApplyError('root 노드의 type은 "SceneRoot"이어야 합니다');
+          return;
+        }
+        if (!parsed.id) {
+          setApplyError('root 노드에 id가 필요합니다');
+          return;
+        }
+        if (!parsed.children || !Array.isArray(parsed.children) || parsed.children.length === 0) {
+          setApplyError('root 노드에 children 배열이 필요합니다');
+          return;
+        }
+        // Apply
+        onPushUndo && onPushUndo();
+        onUpdateScene({
+          ...scene,
+          _original: {
+            ...scene._original,
+            stack_root: parsed,
+          },
+        });
+        setApplySuccess(true);
+        setTimeout(() => setApplySuccess(false), 3000);
+      }
+
+      const hasStackRoot = !!scene._original?.stack_root;
+
+      return (
+        <div style={{ borderTop: '1px solid #2A2A2A', paddingTop: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <span style={{ color: '#C084FC', fontSize: 13, fontWeight: 600 }}>AI 레이아웃</span>
+            {hasStackRoot && (
+              <span style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)',
+                color: '#C084FC', fontSize: 10, padding: '1px 8px', borderRadius: 10 }}>
+                stack_root 있음
+              </span>
+            )}
+          </div>
+
+          <div style={{ color: '#555', fontSize: 11, marginBottom: 10, lineHeight: 1.5 }}>
+            CLI에서 <code style={{ color: '#4A9EFF', background: '#1E1E1E', padding: '1px 4px', borderRadius: 3 }}>/vg-layout</code> 실행 후 새로고침하면 자동 반영됩니다.
+            또는 아래에 JSON을 직접 붙여넣기할 수 있습니다.
+          </div>
+
+          <textarea
+            value={jsonText}
+            onChange={e => { setJsonText(e.target.value); setApplyError(null); setApplySuccess(false); }}
+            placeholder='{"id":"root","type":"SceneRoot","children":[...]}'
+            style={{
+              width: '100%', minHeight: 120, maxHeight: 300, resize: 'vertical',
+              background: '#0A0A0A', border: '1px solid #2A2A2A', borderRadius: 6,
+              color: '#CCC', fontSize: 11, fontFamily: 'monospace',
+              padding: 10, outline: 'none', lineHeight: 1.5,
+            }}
+          />
+
+          {applyError && (
+            <div style={{ color: '#FF4444', fontSize: 11, marginTop: 6 }}>{applyError}</div>
+          )}
+          {applySuccess && (
+            <div style={{ color: '#00FF88', fontSize: 11, marginTop: 6 }}>적용 완료! 저장 버튼을 눌러 반영하세요.</div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button
+              onClick={handleApplyJson}
+              disabled={!jsonText.trim()}
+              style={{
+                background: jsonText.trim() ? '#7C3AED' : '#333',
+                color: jsonText.trim() ? '#FFF' : '#666',
+                border: 'none', borderRadius: 6,
+                padding: '6px 16px', fontSize: 11, fontWeight: 600,
+                cursor: jsonText.trim() ? 'pointer' : 'default',
+              }}
+            >
+              JSON 적용
+            </button>
+            {hasStackRoot && (
+              <button
+                onClick={() => {
+                  const sr = scene._original?.stack_root;
+                  if (sr) setJsonText(JSON.stringify(sr, null, 2));
+                }}
+                style={{
+                  background: 'transparent', border: '1px solid #2A2A2A',
+                  borderRadius: 6, color: '#888', fontSize: 11, padding: '6px 12px',
+                  cursor: 'pointer',
+                }}
+              >
+                현재 stack_root 보기
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── App ─────────────────────────────────────────────────
+    function App() {
+      const [scenes, setScenes] = useState([]);
+      const [originalScenes, setOriginalScenes] = useState([]);
+      const [undoStack, setUndoStack] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [saving, setSaving] = useState(false);
+      const [toast, setToast] = useState(null);
+      const [error, setError] = useState(null);
+      const [selectedSceneIdx, setSelectedSceneIdx] = useState(0);
+      const sceneRefs = useRef([]);
+
+      // Tab state — URL hash 연동
+      const [activeTab, setActiveTab] = useState(() => {
+        const hash = window.location.hash.slice(1);
+        return ['structure', 'meaning', 'preview'].includes(hash) ? hash : 'structure';
+      });
+
+      useEffect(() => {
+        window.location.hash = activeTab;
+      }, [activeTab]);
+
+      // Load scenes
+      useEffect(() => {
+        fetch(API_BASE + '/api/scenes')
+          .then(r => r.json())
+          .then(data => {
+            setScenes(data);
+            setOriginalScenes(JSON.parse(JSON.stringify(data)));
+            setLoading(false);
+          })
+          .catch(err => {
+            setError('scenes.json 로드 실패: ' + err.message);
+            setLoading(false);
+          });
+      }, []);
+
+      const hasChanges = useMemo(() => {
+        return JSON.stringify(scenes) !== JSON.stringify(originalScenes);
+      }, [scenes, originalScenes]);
+
+      // Push to undo stack
+      const pushUndo = useCallback((currentScenes) => {
+        setUndoStack(prev => {
+          const next = [JSON.stringify(currentScenes), ...prev];
+          return next.slice(0, 20);
+        });
+      }, []);
+
+      // Operations
+      const handleSplit = useCallback((sceneIdx, splitSubIdx) => {
+        setScenes(prev => {
+          pushUndo(prev);
+          const result = splitScene(prev, sceneIdx, splitSubIdx);
+          if (result.length === prev.length) {
+            setToast({ message: '나눌 수 없습니다', type: 'error' });
+            return prev;
+          }
+          setToast({ message: `씬 #${sceneIdx + 1} 분할됨`, type: 'success' });
+          return result;
+        });
+      }, [pushUndo]);
+
+      const handleMerge = useCallback((idxA, idxB) => {
+        setScenes(prev => {
+          const a = prev[idxA], b = prev[idxB];
+          if ((a.subtitles?.length || 0) + (b.subtitles?.length || 0) > 10) {
+            setToast({ message: '병합 시 10자막 초과', type: 'error' });
+            return prev;
+          }
+          pushUndo(prev);
+          const result = mergeScenes(prev, idxA, idxB);
+          setToast({ message: `씬 #${idxA + 1} + #${idxB + 1} 병합됨`, type: 'success' });
+          return result;
+        });
+      }, [pushUndo]);
+
+      const handleMoveUp = useCallback((sceneIdx) => {
+        setScenes(prev => {
+          pushUndo(prev);
+          const result = moveSubtitle(prev, sceneIdx, 'up');
+          if (result === prev) {
+            setToast({ message: '이동할 수 없습니다', type: 'error' });
+            return prev;
+          }
+          setToast({ message: `자막을 씬 #${sceneIdx}로 이동`, type: 'info' });
+          return result;
+        });
+      }, [pushUndo]);
+
+      const handleMoveDown = useCallback((sceneIdx) => {
+        setScenes(prev => {
+          pushUndo(prev);
+          const result = moveSubtitle(prev, sceneIdx, 'down');
+          if (result === prev) {
+            setToast({ message: '이동할 수 없습니다', type: 'error' });
+            return prev;
+          }
+          setToast({ message: `자막을 씬 #${sceneIdx + 2}로 이동`, type: 'info' });
+          return result;
+        });
+      }, [pushUndo]);
+
+      const handleUndo = useCallback(() => {
+        setUndoStack(prev => {
+          if (prev.length === 0) return prev;
+          const [last, ...rest] = prev;
+          setScenes(JSON.parse(last));
+          setToast({ message: '되돌리기 완료', type: 'info' });
+          return rest;
+        });
+      }, []);
+
+      const handleSave = useCallback(async () => {
+        if (!hasChanges || saving) return;
+        setSaving(true);
+        try {
+          const res = await fetch(API_BASE + '/api/scenes', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(scenes),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            setOriginalScenes(JSON.parse(JSON.stringify(scenes)));
+            setUndoStack([]);
+            setToast({ message: `저장 완료 (${data.count}씬)`, type: 'success' });
+          } else {
+            setToast({ message: '저장 실패', type: 'error' });
+          }
+        } catch (err) {
+          setToast({ message: '저장 실패: ' + err.message, type: 'error' });
+        }
+        setSaving(false);
+      }, [scenes, hasChanges, saving]);
+
+      const scrollToScene = useCallback((idx) => {
+        sceneRefs.current[idx]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, []);
+
+      // updateScene: 의미 탭에서 개별 씬 업데이트
+      const updateScene = useCallback((sceneIdx, updatedScene) => {
+        setScenes(prev => {
+          const next = prev.map((s, i) => i === sceneIdx ? updatedScene : s);
+          setToast({ message: `씬 #${sceneIdx + 1} 의미 분석 업데이트됨`, type: 'success' });
+          return next;
+        });
+      }, []);
+
+      // pushUndoForMeaning: 의미 탭 변경 전 현재 상태 저장
+      const pushUndoForMeaning = useCallback(() => {
+        setScenes(prev => {
+          pushUndo(prev);
+          return prev;
+        });
+      }, [pushUndo]);
+
+      // Keyboard shortcuts
+      useEffect(() => {
+        function onKeyDown(e) {
+          if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+            e.preventDefault();
+            handleUndo();
+          }
+          if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+            e.preventDefault();
+            handleSave();
+          }
+        }
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+      }, [handleUndo, handleSave]);
+
+      if (loading) {
+        return (
+          <div className="flex items-center justify-center min-h-screen">
+            <div className="text-txt-muted text-sm">로딩 중...</div>
+          </div>
+        );
+      }
+
+      if (error) {
+        return (
+          <div className="flex flex-col items-center justify-center min-h-screen gap-3">
+            <div className="text-accent-red text-sm">{error}</div>
+            <div className="text-txt-muted text-xs">npm run editor 로 서버를 먼저 실행하세요</div>
+          </div>
+        );
+      }
+
+      const selectedScene = scenes[selectedSceneIdx] || null;
+
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+          {/* Header */}
+          <Header scenes={scenes} hasChanges={hasChanges} onSave={handleSave} saving={saving} />
+
+          {/* Timeline MiniBar */}
+          <div className="max-w-7xl mx-auto w-full pt-3 px-0">
+            <TimelineMiniBar scenes={scenes} scrollToScene={scrollToScene} />
+          </div>
+
+          {/* TabBar */}
+          <div className="max-w-7xl mx-auto w-full">
+            <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
+          </div>
+
+          {/* Main Layout: Sidebar + Content */}
+          <div
+            style={{
+              display: 'flex',
+              flex: 1,
+              maxWidth: 1280,
+              width: '100%',
+              margin: '0 auto',
+              minHeight: 0,
+              height: 'calc(100vh - 120px)',
+            }}
+          >
+            {/* Scene List Sidebar — shared across all tabs */}
+            <SceneListSidebar
+              scenes={scenes}
+              selectedIdx={selectedSceneIdx}
+              onSelect={setSelectedSceneIdx}
+              sceneRefs={sceneRefs}
+            />
+
+            {/* Tab Content */}
+            <div style={{ flex: 1, overflowY: 'auto', minWidth: 0 }}>
+              {activeTab === 'structure' && (
+                <StructureTab
+                  scenes={scenes}
+                  onSplit={handleSplit}
+                  onMoveUp={handleMoveUp}
+                  onMoveDown={handleMoveDown}
+                  onMerge={handleMerge}
+                  sceneRefs={sceneRefs}
+                />
+              )}
+              {activeTab === 'meaning' && (
+                <MeaningTab
+                  scene={selectedScene}
+                  sceneIdx={selectedSceneIdx}
+                  updateScene={updateScene}
+                  pushUndo={pushUndoForMeaning}
+                />
+              )}
+              {activeTab === 'preview' && (
+                <PreviewTab
+                  scene={selectedScene}
+                  onUpdateScene={(updatedScene) => updateScene(selectedSceneIdx, updatedScene)}
+                  onPushUndo={pushUndoForMeaning}
+                />
+              )}
+            </div>
+          </div>
+
+          <UndoBar undoCount={undoStack.length} onUndo={handleUndo} />
+          {toast && <Toast message={toast.message} type={toast.type} onDone={() => setToast(null)} />}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

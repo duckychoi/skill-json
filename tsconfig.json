@@ -1,0 +1,50 @@
+{
+  "compilerOptions": {
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/types/*": ["./src/domain/shared/types/*"],
+      "@/types": ["./src/domain/shared/types"],
+      "@/lib/*": ["./src/domain/shared/*"],
+      "@/data/*": ["./src/domain/reat/data/*"],
+      "@/services/file-service": ["./src/infrastructure/persistence/file-service"],
+      "@/services/remotion-builder": ["./src/infrastructure/rendering/remotion-builder"],
+      "@/services/*": ["./src/domain/reat/service/*"],
+      "@/components/*": ["./src/presentation/components/*"],
+      "@/stores/*": ["./src/presentation/stores/*"],
+      "@/hooks/*": ["./src/presentation/hooks/*"],
+      "@/infrastructure/*": ["./src/infrastructure/*"],
+      "@/domain/*": ["./src/domain/*"],
+      "@/*": ["./src/*"]
+    },
+    "target": "ES2017"
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

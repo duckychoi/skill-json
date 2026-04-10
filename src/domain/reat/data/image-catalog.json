@@ -1,0 +1,58 @@
+{
+  "categories": [
+    {
+      "id": "people",
+      "label": "People & Avatars",
+      "keywords": ["person", "user", "team", "developer", "engineer", "manager"],
+      "description": "Transparent PNG silhouettes and avatar illustrations"
+    },
+    {
+      "id": "devices",
+      "label": "Devices & Screens",
+      "keywords": ["phone", "laptop", "desktop", "tablet", "smartwatch"],
+      "description": "Device mockup images with transparent backgrounds"
+    },
+    {
+      "id": "tech",
+      "label": "Technology",
+      "keywords": ["ai", "robot", "chip", "cloud", "server", "database", "network"],
+      "description": "Tech-related illustrations"
+    },
+    {
+      "id": "business",
+      "label": "Business & Work",
+      "keywords": ["chart", "growth", "money", "meeting", "office", "presentation"],
+      "description": "Business concept illustrations"
+    },
+    {
+      "id": "education",
+      "label": "Education",
+      "keywords": ["book", "school", "graduation", "study", "learning", "lecture"],
+      "description": "Education-related illustrations"
+    },
+    {
+      "id": "brands",
+      "label": "Brand Logos",
+      "keywords": ["google", "apple", "meta", "anthropic", "openai", "microsoft"],
+      "description": "Company and brand logos"
+    },
+    {
+      "id": "concepts",
+      "label": "Abstract Concepts",
+      "keywords": ["success", "failure", "growth", "innovation", "security", "speed"],
+      "description": "Conceptual illustrations"
+    },
+    {
+      "id": "nature",
+      "label": "Nature & Science",
+      "keywords": ["planet", "atom", "dna", "tree", "water", "fire"],
+      "description": "Nature and science illustrations"
+    }
+  ],
+  "sources": [
+    { "name": "Flaticon", "url": "https://www.flaticon.com", "license": "Free with attribution" },
+    { "name": "SVGRepo", "url": "https://www.svgrepo.com", "license": "Various open licenses" },
+    { "name": "Undraw", "url": "https://undraw.co", "license": "Open source, free" },
+    { "name": "IconScout", "url": "https://iconscout.com", "license": "Free tier available" }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "completed_skill": "screen-spec",
+  "next_skill": "tasks-generator",
+  "timestamp": "2026-03-10",
+  "context_summary": {
+    "project_name": "newVideoGen",
+    "description": "SRT 자막 + 더빙 오디오 → AI가 프레젠테이션 영상 자동 생성",
+    "features": [
+      "FEAT-1: 의미 청킹 엔진 (SRT → 의미 역할 + 비트 분해)",
+      "FEAT-2: 장면 선택 + DSL 생성 (제약 기반 변주, 8개 루트 레이아웃)",
+      "FEAT-3: 타임라인 에디터 (웹 앱, 구간 편집, DSL 수정)",
+      "FEAT-4: Remotion 렌더링 (DSL → TSX → mp4)"
+    ],
+    "screens": [
+      "S1: 타임라인 에디터 (/, main-sidebar, 장면 시퀀스 + DSL 편집 + 오디오 파형)",
+      "S2: Remotion 프리뷰 (/preview, full-width, Remotion Player 실시간)",
+      "S3: 렌더 출력 (/render, full-width, 진행률 + mp4 다운로드)"
+    ],
+    "tech_stack": {
+      "frontend": "Next.js + Tailwind CSS + ShadCN UI",
+      "video": "Remotion",
+      "skills": "Claude Code Skills (TypeScript)",
+      "dsl": "Scene DSL (JSON)",
+      "backend": "파일 시스템 기반"
+    },
+    "architecture": {
+      "pipeline": "4층: 의미 청킹 → 장면 DSL → 레이아웃 엔진 → Remotion 렌더",
+      "skills": ["/vg-analyze", "/vg-catalog", "/vg-chunk", "/vg-scene", "/vg-render"],
+      "layout_families": 8,
+      "domain_resources": ["project", "scenes", "audio", "render_job", "layout_families"],
+      "shared_types": 13
+    }
+  },
+  "output_files": [
+    "specs/domain/resources.yaml",
+    "specs/screens/index.yaml",
+    "specs/screens/timeline-editor.yaml",
+    "specs/screens/remotion-preview.yaml",
+    "specs/screens/render-output.yaml",
+    "specs/shared/components.yaml",
+    "specs/shared/types.yaml"
+  ]
+}
